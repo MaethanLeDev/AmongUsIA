@@ -8,6 +8,7 @@ import { ARCHETYPES, HAIR_COLORS, EYE_COLORS, ACCENT_COLORS, setOutlines } from 
 import { Net } from './net.js';
 import { createHub } from './hub3d.js';
 import { initTable } from './tableui.js';
+import { initEspion } from './espionui.js';
 
 const $ = id => document.getElementById(id);
 const h = (tag, attrs, ...kids) => {
@@ -138,6 +139,7 @@ $('btnSound').onclick = () => { muted = !muted; store.set('cn_mute', muted ? '1'
 // ------------------------------------------------------------------ état du salon
 let users = [], hubState = null, curMode = '';
 const table = initTable({ Net, beep });
+const espionUI = initEspion({ Net, hub, isHost: () => !!hubState && hubState.host === Net.id });
 
 Net.on('welcome', () => {
   $('login').classList.add('hidden'); hub.setPreview(null); $('hubUI').classList.remove('hidden'); beep(440, 0.15, 0.06);
@@ -155,16 +157,19 @@ Net.on('hchat', m => {
   const d = h('div', { class: 'm' }, h('span', { class: 'who', style: `color:${colorOf(m.from)}`, text: m.name }), ': ' + m.text);
   const box = $('hubLog'); box.append(d); while (box.children.length > 80) box.firstChild.remove(); box.scrollTop = box.scrollHeight;
   if (m.from !== Net.id) beep(560, 0.06, 0.04);
+  if (m.from) hub.say(m.from, m.text);
 });
 $('hubForm').addEventListener('submit', e => { e.preventDefault(); const t = $('hubMsg').value.trim(); if (t) Net.send({ t: 'hchat', text: t }); $('hubMsg').value = ''; });
 setInterval(() => { $('ping').textContent = Net.ping ? Net.ping + ' ms' : ''; }, 2000);
 
 function switchMode(mode) {
   const prev = curMode; curMode = mode;
-  $('tableUI').classList.add('hidden');
+  $('tableUI').classList.add('hidden'); espionUI.hide();
+  document.body.classList.toggle('mode-espion', mode === 'espion');
   table.hide(); hub.setMode(mode);
   if (mode === 'hub') { $('hubUI').classList.toggle('hidden', !Net.joined); setActive(hub); }
   else if (mode === 'table') { $('hubUI').classList.add('hidden'); setActive(hub); table.show(); }
+  else if (mode === 'espion') { $('hubUI').classList.toggle('hidden', !Net.joined); setActive(hub); espionUI.show(); }
 }
 
 function renderHub() {
@@ -172,10 +177,11 @@ function renderHub() {
   const m = hubState, isHost = m.host === Net.id;
   const us = $('hubUsers'); us.textContent = '';
   for (const u of m.users) us.append(h('div', { class: 'urow' }, h('span', { class: 'dot', style: `background:${colorOf(u.id)}` }), h('span', { class: 'nm', text: (m.host === u.id ? '👑 ' : '') + (u.ext ? '📡 ' : '') + u.name + (u.id === Net.id ? ' (toi)' : '') }), h('small', { text: ARCHETYPES[(u.look || {}).arch || 'stratege'].name })));
-  $('hubStatus').textContent = m.inGame ? '⏳ Partie en cours — tu rejoindras au prochain tour' : m.users.length < 3 ? 'Il faut au moins 3 joueurs (ou des pions 🤖 à la table)' : 'Choisis ce que vous allez jouer';
+  $('hubStatus').textContent = curMode === 'espion' ? 'Tu observes la partie du TP' : m.inGame ? '⏳ Partie en cours — tu rejoindras au prochain tour' : m.users.length < 3 ? 'Il faut au moins 3 joueurs (ou des pions 🤖 à la table)' : 'Choisis ce que vous allez jouer';
   const modes = $('hubModes'); modes.textContent = '';
   const card = (ic, title, text, mode) => h('button', { class: 'modecard', disabled: !isHost || m.inGame, onclick: () => Net.send({ t: 'mode', mode }) }, h('div', { class: 'ic', text: ic }), h('b', { text: title }), h('small', { text }));
   modes.append(
+    card('🕵', 'ESPION', 'Le TP : des capteurs Raspberry Pi échangent des températures, un espion triche, ils votent.', 'espion'),
     card('🃏', 'LA TABLE', 'Table ronde : pactes, trahisons, faux coupables. Les agents IA des Raspberry Pi y discutent.', 'table'));
   if (!isHost) modes.append(h('div', { class: 'waithost', text: 'L\'hôte (👑) choisit le mode de jeu.' }));
   const bd = $('board'); bd.textContent = '';

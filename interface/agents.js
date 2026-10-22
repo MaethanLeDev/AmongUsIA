@@ -13,13 +13,14 @@ const REPLY_MIN_MS = 8000;           // un agent API ne répond pas plus d'une f
 const REPLY_TIMEOUT_MS = 120000;     // un petit LLM sur Raspberry Pi peut être lent
 const CHAT_KEEP = 100;
 
-module.exports = function createAgents({ host, table, users, newId, cleanText, cleanLook, ARCHS, isInGame, broadcastHub, hubChat, reassignHost }) {
+module.exports = function createAgents({ host, table, espion, users, newId, cleanText, cleanLook, ARCHS, isInGame, broadcastHub, hubChat, reassignHost }) {
   const agents = new Map();          // id (texte, ex. "rpi1") -> { id, user, ville, api, via, temp, lastSeen, busy, lastReply, vote }
   const chatLog = [];                // derniers messages de la table, relisibles par GET /api/chat?since=N
   let seq = 0, mqtt = null, brokerLabel = '', streak = 0;
   const log = s => console.log('  [agents] ' + s);
 
   const hashArch = id => ARCHS[[...id].reduce((a, c) => a + c.charCodeAt(0), 0) % ARCHS.length];
+  const list = () => [...agents.values()].map(a => ({ id: a.id, userId: a.user.id, name: a.user.name, ville: a.ville, online: a.user.connected }));
   const agentOfUser = uid => [...agents.values()].find(a => a.user.id === uid);
   const resolveTarget = to => {                       // "rpi2" (id d'agent) ou numéro de joueur de la table
     if (to == null || to === '') return 0;
@@ -44,7 +45,7 @@ module.exports = function createAgents({ host, table, users, newId, cleanText, c
     if (info.ville) a.ville = cleanText(info.ville, 30);
     if (info.api && /^https?:\/\/[\w.\-:]+(\/.*)?$/.test(info.api)) a.api = info.api.replace(/\/$/, '');
     if (info.nom) a.user.name = cleanText(info.nom, 16) || a.user.name;
-    reassignHost(); broadcastHub();
+    reassignHost(); broadcastHub(); espion.changed();
     if (table.isActive()) table.addUser(a.user);
     return a;
   }
@@ -54,7 +55,7 @@ module.exports = function createAgents({ host, table, users, newId, cleanText, c
     if (table.isActive()) table.onDisconnect(a.user);
     if (!isInGame()) { users.delete(a.user.id); agents.delete(id); }     // en pleine partie, il reste (hors ligne) jusqu'à la fin
     hubChat('📡 Salon', `${a.user.name} a quitté la classe.`);
-    reassignHost(); broadcastHub();
+    reassignHost(); broadcastHub(); espion.changed();
     return true;
   }
   function keepOnlyAgents() { for (const [id, u] of users) if (!u.ext) users.delete(id); }
@@ -75,7 +76,7 @@ module.exports = function createAgents({ host, table, users, newId, cleanText, c
     if (table.isActive()) return table.chatAs(a.user.id, text, toId);
     if (toId) return false;                                    // pas de messages privés dans le salon : on ne le publie pas à tout le monde
     text = cleanText(text); if (!text) return false;
-    hubChat(a.user.name, text);
+    hubChat(a.user.name, text, a.user.id);
     onTableChat({ kind: 'pub', from: a.user.id, name: a.user.name, text });
     return true;
   }
@@ -109,16 +110,16 @@ module.exports = function createAgents({ host, table, users, newId, cleanText, c
       a.lastSeen = Date.now();
       if (!say(a, obj.text, resolveTarget(obj.to))) log(`${t[2]} : message ignoré (la table n'est pas en phase de discussion)`);
     } else if (t[1] === 'capteurs' && t[3] === 'temperature') {
-      const a = agents.get(t[2]); if (a && typeof obj.temperature === 'number') { a.temp = { value: obj.temperature, manche: obj.manche, ville: obj.ville, ts: Date.now() }; a.lastSeen = Date.now(); }
+      const a = agents.get(t[2]); if (a && typeof obj.temperature === 'number') { a.temp = { value: obj.temperature, manche: obj.manche, ville: obj.ville, ts: Date.now() }; a.lastSeen = Date.now(); espion.onTemp(a.id, obj); }
     } else if (t[1] === 'votes' && t[2]) {
       const a = agents.get(t[2]); if (!a) return;
-      a.vote = { suspect: obj.suspect, raison: obj.raison };
+      a.vote = { suspect: obj.suspect, raison: obj.raison }; espion.onVote(a.id, obj);
       table.info(`🗳 ${a.user.name} soupçonne ${obj.suspect}${obj.raison ? ' : ' + cleanText(obj.raison, 120) : ''}`);
     } else if (t[1] === 'partie' && t[2] === 'resultat') {
       const txt = `Résultat du TP : l'espion était ${obj.espion}, désigné ${obj.designe} → victoire des ${obj.gagnant}.`;
-      table.info('🏁 ' + txt); hubChat('📡 MQTT', txt);
+      espion.onResultat(obj); table.info('🏁 ' + txt); hubChat('📡 MQTT', txt);
     } else if (t[1] === 'partie' && t[2] === 'etat') {
-      hubChat('📡 MQTT', `Partie du TP : ${obj.etat}.`);
+      espion.onEtat(obj);
     }
   }
 
@@ -167,5 +168,5 @@ module.exports = function createAgents({ host, table, users, newId, cleanText, c
     json(res, 404, { erreur: 'route inconnue' });
   }
 
-  return { start, http, onTableChat, say, keepOnlyAgents, join, leave, status };
+  return { list, start, http, onTableChat, say, keepOnlyAgents, join, leave, status };
 };

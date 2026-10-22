@@ -7,6 +7,7 @@ const crypto = require('crypto');
 const os = require('os');
 const createTable = require('./table.js');
 const createAgents = require('./agents.js');
+const createEspion = require('./espion.js');
 
 const PORT = Number(process.env.PORT) || 3939;
 const PUBLIC = path.join(__dirname, 'public');
@@ -36,13 +37,14 @@ const host = {
   recordWinner(mode, name, score) { hub.board.unshift({ mode, name, score, at: Date.now() }); hub.board = hub.board.slice(0, 8); broadcastHub(); },
 };
 const table = createTable(host);
-// Pont vers les Raspberry Pi (MQTT + API HTTP) : voir AGENTS.md
+// Partie du TP (espion) suivie via MQTT, puis pont vers les Raspberry Pi : voir AGENTS.md
+const espion = createEspion({ list: () => agents.list(), sendAll: o => sendAllUsers(o), sendUser: (id, o) => host.sendUser(id, o) });
 const agents = createAgents({
-  host, table,
+  host, table, espion,
   users, newId: () => nextId++, cleanText, cleanLook, ARCHS,
   isInGame: () => hub.inGame,
   broadcastHub: () => broadcastHub(),
-  hubChat: (name, text) => sendAllUsers({ t: 'hchat', from: 0, name, text }),
+  hubChat: (name, text, from = 0) => sendAllUsers({ t: 'hchat', from, name, text }),
   reassignHost: () => reassignHost(),
 });
 host.onChat = msg => agents.onTableChat(msg);
@@ -57,12 +59,12 @@ function hubState() {
 function broadcastHub() { sendAllUsers(hubState()); }
 
 function setMode(mode) {
-  if (!['hub', 'table'].includes(mode) || hub.mode === mode) return;
-  table.close();
+  if (!['hub', 'table', 'espion'].includes(mode) || hub.mode === mode) return;
+  table.close(); espion.close();
   hub.mode = mode; hub.inGame = false; hub.playing = new Set();
   broadcastHub();                        // le client doit connaître le nouveau mode avant de recevoir l'état du moteur
   const list = [...users.values()].filter(u => u.connected);
-  if (mode === 'table') table.open(list);
+  if (mode === 'table') table.open(list); else if (mode === 'espion') espion.open();
 }
 function reassignHost() {
   const cur = users.get(hub.hostId);
@@ -96,6 +98,7 @@ function onMessage(conn, text) {
     conn.send(JSON.stringify({ t: 'welcome', id: u.id, token: u.token }));
     broadcastHub();
     if (hub.mode === 'table') (back ? table.onReconnect(u) : table.addUser(u));
+    if (hub.mode === 'espion') espion.sendTo(u.id);
     return;
   }
   if (!u) return;
@@ -119,7 +122,7 @@ function onClose(conn) {
   if (hub.mode === 'table') table.onDisconnect(u);
   reassignHost();
   const humansLeft = () => [...users.values()].some(x => x.connected && !x.ext);
-  if (!humansLeft()) { table.close(); hub.mode = 'hub'; hub.inGame = false; setTimeout(() => { if (!humansLeft()) agents.keepOnlyAgents(); }, 60000); }
+  if (!humansLeft()) { table.close(); espion.close(); hub.mode = 'hub'; hub.inGame = false; setTimeout(() => { if (!humansLeft()) agents.keepOnlyAgents(); }, 60000); }
   broadcastHub();
   setTimeout(() => { if (!u.connected && !hub.inGame && users.get(u.id) === u) { users.delete(u.id); broadcastHub(); } }, 25000);
 }

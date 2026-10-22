@@ -170,3 +170,13 @@ details { margin: 6px 0; } summary { cursor: pointer; color: var(--dim); } detai
   #mPanel { bottom: 8px; } .agrid { grid-template-columns: 1fr 1fr; }
   #mBtns { bottom: 6px; } #mBtns .ghost { padding: 4px 8px; font-size: 11px; }
 }
+
+/* ---------- mode espion (partie du TP) ---------- */
+.mode-espion .hubleft, .mode-espion #hubModes, .mode-espion .hubright .label, .mode-espion #board { display: none; }
+.mode-espion .hubright { bottom: 20px; }
+#espionUI { position: absolute; left: 14px; top: 64px; bottom: 20px; width: 310px; padding: 12px; overflow: auto; display: flex; flex-direction: column; gap: 8px; }
+.edots { display: flex; gap: 5px; } .edots i { width: 26px; height: 6px; border-radius: 3px; background: #241b24; } .edots i.on { background: var(--red); }
+.ecard { background: var(--panel2); border: 1px solid #251b25; border-radius: 10px; padding: 8px 10px; } .ecard.off { opacity: .45; } .ecard.spy { border-color: var(--red); box-shadow: 0 0 18px rgba(214,24,44,.35); }
+.ecard .top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; } .etemp { font-size: 26px; font-weight: 800; } .evote { font-size: 13px; margin-top: 4px; }
+.eres { font-weight: 800; padding: 8px 10px; border-radius: 10px; background: rgba(0,0,0,.35); border: 1px solid var(--line); }
+@media (max-width: 960px) { #espionUI { width: 46vw; bottom: auto; max-height: 55vh; } .mode-espion .hubright { display: none; } }

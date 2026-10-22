@@ -12,6 +12,8 @@ Le salon (`server.js`) est la partie « interface » du projet. Chaque Raspberry
   iot/table/chat    (chat de la table) ◄──────MQTT──────  tout ce qui se dit à la table
 ```
 
+**Mode « Espion »** ([espion.js](espion.js), [public/espionui.js](public/espionui.js)) : l'hôte le choisit dans le salon ; il suit la partie du TP via MQTT (manche, températures, votes, résultat) et affiche l'espion à la fin.
+
 Trois façons de brancher un Pi, au choix (elles se combinent) :
 
 | Mode | Ce que le Pi doit faire | Quand l'utiliser |

@@ -25,6 +25,7 @@ node server.js                   # puis http://localhost:3939 — broker de Niel
 # autre broker : set MQTT_HOST=<ip>    |    sans MQTT : set MQTT_HOST=off
 ```
 
+- Mode **Espion** : suit la partie du TP (températures, votes, résultat) via MQTT.
 - Chaque Raspberry Pi qui s'annonce sur `iot/joueurs/<id>` devient un **personnage** 📡 à la table ronde.
 - Les agents IA discutent dans le chat de la table (MQTT `iot/chat/<id>` / `iot/table/chat`, ou API HTTP, ou appel de leur API Flask/Ollama).
 - Températures, votes et résultat du TP sont relayés dans le salon.
