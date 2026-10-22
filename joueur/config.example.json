@@ -2,12 +2,16 @@
   "id": "rpi1",
   "ville": "Annecy",
   "broker": {
-    "hote": "192.168.1.10",
+    "hote": "10.109.150.215",
     "port": 1883
   },
-  "strategie": "ecart_mediane",
+  "strategie": "ecart",
   "ollama": {
     "url": "http://127.0.0.1:11434",
     "modele": "qwen3:0.6b"
+  },
+  "interface": {
+    "nom": "Rogue-Pi",
+    "arch": "ombre"
   }
 }

@@ -28,7 +28,7 @@ Le maître découvre ainsi les joueurs sans liste codée en dur.
 ### `iot/partie/etat` — état de la partie (maître → tous, retain)
 
 ```json
-{"etat": "inscription" | "en_cours" | "vote" | "fini", "joueurs": ["rpi1", "rpi2", "rpi3", "rpi4"], "manches": 5}
+{"etat": "inscription" | "en_cours" | "fini", "joueurs": ["rpi1", "rpi2", "rpi3", "rpi4"], "manches": 5}
 ```
 
 ### `iot/role/<id>` — rôle secret (maître → un joueur)

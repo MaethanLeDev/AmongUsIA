@@ -1,7 +1,7 @@
 [project]
 name = "amongusia"
 version = "0.1.0"
-description = "Add your description here"
+description = "Jeu distribué de l'espion : joueurs Raspberry Pi et maître du jeu communiquant par MQTT"
 readme = "README.md"
 authors = [
     { name = "MaethanLeDev", email = "maethan.tordeux@etu.univ-smb.fr" }
@@ -12,9 +12,6 @@ dependencies = [
     "requests>=2.34.2",
 ]
 
-[project.scripts]
-amongusia = "amongusia:main"
-
-[build-system]
-requires = ["uv_build>=0.13.5,<0.14.0"]
-build-backend = "uv_build"
+# Ce sont des scripts (uv run joueur/joueur.py), pas un paquet à installer
+[tool.uv]
+package = false
