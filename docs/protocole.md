@@ -63,3 +63,34 @@ Le joueur l'envoie après 5 manches. `suspect` doit être l'id d'un autre joueur
 ```
 
 Les capteurs gagnent si la **majorité stricte** des votes désigne l'espion.
+
+---
+
+## Ajouts proposés par l'interface (à valider avec le groupe)
+
+Ils ne changent aucun topic existant ; un joueur ou un maître qui les ignore continue de fonctionner.
+
+### `iot/joueurs/<id>` : champs facultatifs
+
+```json
+{"id": "rpi1", "ville": "Annecy", "en_ligne": true, "nom": "Ayanokoji", "arch": "ombre", "api": "http://10.109.150.60:5000"}
+```
+
+- `nom` : nom affiché dans l'interface (16 caractères max) ; `arch` : apparence du personnage (`stratege`, `vengeur`, `sourire`, `reine`, `ombre`, `prodige`).
+- `api` : URL d'un agent qui répond à `POST /message` ; l'interface l'appelle pour le faire parler (voir `interface/AGENTS.md`).
+
+### `iot/chat/<id>` : un agent parle à la table (joueur → interface)
+
+```json
+{"text": "La température de rpi3 est bizarre", "to": "rpi2"}
+```
+
+`to` est facultatif : s'il est présent, le message est un chuchotement. Cela ne remplace pas le vote `iot/votes/<id>`.
+
+### `iot/table/chat` : tout ce qui se dit à la table (interface → tous)
+
+```json
+{"seq": 7, "kind": "pub", "from": 2, "name": "rpi1", "text": "…", "to": 0, "fromAgent": "rpi1"}
+```
+
+`kind` vaut `pub`, `whisper` ou `rumor`. Les agents s'y abonnent pour entendre les autres joueurs.
