@@ -1,9 +1,12 @@
-"""Joueur générique : un capteur de température sur Raspberry Pi.
+"""Joueur générique : un capteur de température piloté par une IA Ollama.
 
-Le même script tourne sur toutes les machines, seul config.json change.
+Le même script tourne sur toutes les machines. Tout ce qui se personnalise est dans config.json :
+ville, modèle Ollama, personnalité, nom et apparence dans l'interface.
+
 Usage : uv run joueur/joueur.py [chemin/vers/config.json]
 Protocole : docs/protocole.md
 """
+import copy
 import json
 import random
 import statistics
@@ -13,114 +16,41 @@ import time
 from pathlib import Path
 
 import paho.mqtt.client as mqtt
-import requests
 
-DUREE_MANCHE = 5         # secondes entre deux températures, fixé par le sujet
-ECART_ESPION = (0.05, 0.10)  # l'espion décale la moyenne des autres de 5 à 10 %, vers le haut ou le bas
+from ia import IA, Partie
+from meteo import Meteo
 
+DUREE_MANCHE = 5              # secondes entre deux températures, fixé par le sujet
+ECART_ESPION = (0.05, 0.10)   # l'espion décale la moyenne des autres de 5 à 10 %, vers le haut ou le bas
 
-# --- Météo ---------------------------------------------------------------
-
-class Meteo:
-    """Température actuelle d'une ville via l'API Open-Meteo."""
-
-    def __init__(self, ville):
-        reponse = requests.get("https://geocoding-api.open-meteo.com/v1/search",
-                               params={"name": ville, "count": 1, "language": "fr"}, timeout=10)
-        reponse.raise_for_status()
-        resultats = reponse.json().get("results")
-        if not resultats:
-            raise ValueError(f"Ville introuvable : {ville}")
-        self.latitude = resultats[0]["latitude"]
-        self.longitude = resultats[0]["longitude"]
-        self.derniere = None
-
-    def temperature(self):
-        try:
-            reponse = requests.get("https://api.open-meteo.com/v1/forecast",
-                                   params={"latitude": self.latitude, "longitude": self.longitude,
-                                           "current": "temperature_2m"}, timeout=10)
-            reponse.raise_for_status()
-            self.derniere = reponse.json()["current"]["temperature_2m"]
-        except (requests.RequestException, KeyError) as erreur:
-            print(f"  Météo indisponible ({erreur}), on garde la dernière valeur")
-        return self.derniere
-
-
-# --- Stratégies de détection ---------------------------------------------
-# Chaque stratégie reçoit l'historique {id: [températures]} des autres joueurs
-# et renvoie (suspect, raison).
-
-def strategie_ecart(historique):
-    """Le suspect est celui qui s'écarte le plus des autres et dont les valeurs varient le plus.
-
-    Les vraies températures bougent peu en 25 s, alors que l'espion tire une valeur différente à chaque manche.
-    """
-    scores = {}
-    for id_joueur, valeurs in historique.items():
-        ecarts = []
-        for manche, valeur in enumerate(valeurs):
-            autres = [v[manche] for i, v in historique.items() if i != id_joueur and manche < len(v)]
-            if autres:
-                ecarts.append(abs(valeur - statistics.median(autres)))
-        ecart_moyen = statistics.mean(ecarts) if ecarts else 0
-        instabilite = statistics.pstdev(valeurs) if len(valeurs) > 1 else 0
-        scores[id_joueur] = ecart_moyen + instabilite
-
-    suspect = max(scores, key=scores.get)
-    return suspect, f"score {scores[suspect]:.2f} (écart à la médiane + instabilité)"
-
-
-def strategie_llm(historique, config_ollama):
-    """Demande l'avis du LLM local, et revient à strategie_ecart s'il ne donne pas un id valide."""
-    tableau = "\n".join(f"- {i} : {', '.join(f'{v:.1f}' for v in valeurs)} °C"
-                        for i, valeurs in historique.items())
-    question = ("Plusieurs capteurs de villes voisines mesurent la température. L'un d'eux est un espion "
-                "qui publie de fausses valeurs, différentes d'environ 10 % et qui changent à chaque mesure.\n"
-                f"Mesures successives :\n{tableau}\n"
-                "Quel capteur est l'espion ? Réponds uniquement par son identifiant.")
-    try:
-        reponse = requests.post(f"{config_ollama['url']}/api/chat", timeout=60, json={
-            "model": config_ollama["modele"],
-            "messages": [{"role": "user", "content": question}],
-            "stream": False,
-            "think": False,
-        })
-        reponse.raise_for_status()
-        texte = reponse.json()["message"]["content"]
-    except (requests.RequestException, KeyError) as erreur:
-        print(f"  LLM indisponible ({erreur})")
-        texte = ""
-
-    # On garde l'id le plus long trouvé dans la réponse, pour ne pas confondre rpi1 et rpi10
-    trouves = [i for i in historique if i in texte]
-    if trouves:
-        suspect = max(trouves, key=len)
-        return suspect, f"avis du LLM : {texte.strip()[:100]}"
-    suspect, raison = strategie_ecart(historique)
-    return suspect, f"LLM sans réponse exploitable, {raison}"
-
-
-# --- Joueur --------------------------------------------------------------
 
 class Joueur:
     def __init__(self, config):
         self.config = config
         self.id = config["id"]
         self.meteo = Meteo(config["ville"])
+        self.ia = IA(config)
         self.verrou = threading.Lock()
-        self.role = None
-        self.historique = {}  # id -> températures reçues des autres joueurs, dans l'ordre des manches
-        self.partie = 0       # incrémenté à chaque partie, pour arrêter une partie devenue obsolète
+        self.annuaire = {}       # id -> message de présence de chaque joueur en ligne
+        self.participants = []   # annoncés par le maître au début de la partie
+        self.partie = None       # partie en cours, None entre deux parties
 
         self.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=f"joueur-{self.id}")
         # Si le joueur disparaît sans prévenir, le broker annonce son départ à sa place
         self.client.will_set(f"iot/joueurs/{self.id}", json.dumps({"id": self.id, "en_ligne": False}),
                              qos=1, retain=True)
         self.client.on_connect = self._on_connect
-        self.client.message_callback_add(f"iot/role/{self.id}", self._on_role)
-        self.client.message_callback_add("iot/partie/etat", self._on_etat)
-        self.client.message_callback_add("iot/capteurs/+/temperature", self._on_temperature)
+        abonnements = {
+            "iot/joueurs/+": self._on_presence,
+            "iot/partie/etat": self._on_etat,
+            f"iot/role/{self.id}": self._on_role,
+            "iot/capteurs/+/temperature": self._on_temperature,
+            "iot/partie/parole": self._on_parole,
+            "iot/chat/+": self._on_chat,
+        }
+        for topic, fonction in abonnements.items():
+            self.client.message_callback_add(topic, fonction)
+        self.abonnements = [(topic, 1) for topic in abonnements]
 
     def lancer(self):
         broker = self.config["broker"]
@@ -134,93 +64,140 @@ class Joueur:
     def publier(self, topic, contenu, retain=False):
         self.client.publish(topic, json.dumps(contenu, ensure_ascii=False), qos=1, retain=retain)
 
+    def log(self, texte):
+        print(f"[{self.ia.nom}] {texte}")
+
     # --- Réception MQTT -------------------------------------------------
 
     def _on_connect(self, client, userdata, flags, reason_code, properties):
-        print(f"[{self.id}] connecté au broker ({reason_code})")
-        client.subscribe([(f"iot/role/{self.id}", 1), ("iot/partie/etat", 1), ("iot/capteurs/+/temperature", 0)])
+        self.log(f"connecté au broker ({reason_code}), modèle {self.ia.modele}")
+        client.subscribe(self.abonnements)
         self.annoncer_presence()
 
     def annoncer_presence(self):
-        presence = {"id": self.id, "ville": self.config["ville"], "en_ligne": True}
-        # Champs facultatifs utilisés par l'interface (nom, arch, api)
-        presence.update(self.config.get("interface", {}))
+        presence = {"id": self.id, "ville": self.config["ville"], "en_ligne": True, "modele": self.ia.modele}
+        presence.update(self.config.get("interface", {}))  # nom, arch
         self.publier(f"iot/joueurs/{self.id}", presence, retain=True)
 
+    def _on_presence(self, client, userdata, msg):
+        presence = lire_json(msg.payload)
+        with self.verrou:
+            if presence.get("en_ligne"):
+                self.annuaire[expediteur(msg)] = presence
+            else:
+                self.annuaire.pop(expediteur(msg), None)
+
     def _on_etat(self, client, userdata, msg):
-        if json.loads(msg.payload).get("etat") == "inscription":
+        etat = lire_json(msg.payload)
+        if etat.get("etat") == "inscription":
             with self.verrou:
-                self.partie += 1  # une éventuelle partie en cours s'arrête
-                self.role = None
-            print(f"[{self.id}] inscription ouverte, en attente du rôle")
+                self.partie = None  # une éventuelle partie en cours s'arrête
+            self.log("inscription ouverte, en attente du rôle")
             self.annoncer_presence()
+        elif etat.get("etat") == "en_cours":
+            with self.verrou:
+                self.participants = etat.get("joueurs", [])
+        elif etat.get("etat") == "vote" and self.partie and self.id in etat.get("joueurs", []):
+            self.en_arriere_plan(self.voter, etat.get("delai", 60))
 
     def _on_role(self, client, userdata, msg):
+        role = lire_json(msg.payload).get("role")
+        if role not in ("normal", "espion"):
+            return
         with self.verrou:
-            if self.role is not None:
-                return
-            self.role = json.loads(msg.payload)["role"]
-            self.historique = {}
-            self.partie += 1
+            self.partie = Partie(self.id, role)
             partie = self.partie
-        print(f"[{self.id}] rôle reçu : {self.role.upper()}")
-        threading.Thread(target=self.jouer, args=(partie,), daemon=True).start()
+        self.log(f"rôle reçu : {role.upper()}")
+        self.en_arriere_plan(self.mesurer, partie)
 
     def _on_temperature(self, client, userdata, msg):
-        expediteur = msg.topic.split("/")[2]
-        if expediteur == self.id:
-            return
-        temperature = json.loads(msg.payload).get("temperature")
-        if isinstance(temperature, (int, float)):
-            with self.verrou:
-                if self.role is not None:
-                    self.historique.setdefault(expediteur, []).append(temperature)
+        temperature = lire_json(msg.payload).get("temperature")
+        with self.verrou:
+            if self.partie and isinstance(temperature, (int, float)):
+                self.partie.mesures.setdefault(msg.topic.split("/")[2], []).append(temperature)
 
-    # --- Déroulement d'une partie --------------------------------------
+    def _on_chat(self, client, userdata, msg):
+        texte = lire_json(msg.payload).get("text")
+        with self.verrou:
+            if self.partie and isinstance(texte, str):
+                self.partie.debat.append((expediteur(msg), texte))
 
-    def jouer(self, partie):
+    def _on_parole(self, client, userdata, msg):
+        parole = lire_json(msg.payload)
+        if self.partie and parole.get("joueur") == self.id:
+            self.en_arriere_plan(self.parler, parole)
+
+    # --- Actions (dans un thread, pour ne pas bloquer le réseau pendant que le LLM réfléchit) ---
+
+    def en_arriere_plan(self, fonction, *args):
+        threading.Thread(target=fonction, args=args, daemon=True).start()
+
+    def instantane(self):
+        """Copie de la partie, avec les noms et villes à jour, que le LLM peut lire tranquillement."""
+        with self.verrou:
+            if self.partie is None:
+                return None
+            partie = copy.deepcopy(self.partie)
+            partie.participants = list(self.participants)
+            partie.noms = {i: p.get("nom") or i for i, p in self.annuaire.items()}
+            partie.villes = {i: p.get("ville", "?") for i, p in self.annuaire.items()}
+        return partie
+
+    def mesurer(self, partie):
         for manche in range(1, 6):
-            if self.partie != partie:
+            if self.partie is not partie:
                 return
-            temperature = self.mesurer()
+            temperature = self.meteo.temperature() if partie.role == "normal" else self.fausse_temperature(partie)
             if temperature is not None:
                 self.publier(f"iot/capteurs/{self.id}/temperature", {
                     "id": self.id, "ville": self.config["ville"], "temperature": round(temperature, 1),
                     "manche": manche, "ts": int(time.time()),
                 })
-                print(f"[{self.id}] manche {manche} : {temperature:.1f} °C")
+                self.log(f"manche {manche} : {temperature:.1f} °C")
             time.sleep(DUREE_MANCHE)
 
-        if self.partie == partie:
-            self.voter()
-
-    def mesurer(self):
-        if self.role != "espion":
-            return self.meteo.temperature()
-
-        # L'espion part de la moyenne des dernières valeurs des autres (ou de la sienne au début)
+    def fausse_temperature(self, partie):
+        # L'espion part de la moyenne des dernières valeurs des autres (ou de la vraie au début)
         with self.verrou:
-            dernieres = [valeurs[-1] for valeurs in self.historique.values()]
+            dernieres = [v[-1] for i, v in partie.mesures.items() if i != self.id and v]
         base = statistics.mean(dernieres) if dernieres else self.meteo.temperature()
         if base is None:
             return None
         return base * (1 + random.choice((-1, 1)) * random.uniform(*ECART_ESPION))
 
-    def voter(self):
-        with self.verrou:
-            historique = {i: list(v) for i, v in self.historique.items()}
-        if not historique:
-            print(f"[{self.id}] aucune température reçue, pas de vote")
+    def parler(self, parole):
+        partie = self.instantane()
+        if partie is None:
             return
+        self.log(f"a la parole (tour {parole.get('tour')}), réfléchit…")
+        debut = time.monotonic()
+        texte = self.ia.parler(partie, parole.get("tour", 1), parole.get("tours", 1),
+                               delai=max(10, parole.get("delai", 90) - 5))
+        self.publier(f"iot/chat/{self.id}", {"text": texte, "tour": parole.get("tour")})
+        self.log(f"({time.monotonic() - debut:.0f} s) {texte}")
 
-        if self.config.get("strategie") == "llm":
-            suspect, raison = strategie_llm(historique, self.config["ollama"])
-        else:
-            suspect, raison = strategie_ecart(historique)
-
+    def voter(self, delai):
+        partie = self.instantane()
+        if partie is None or not partie.autres():
+            return
+        suspect, raison = self.ia.voter(partie, delai=max(10, delai - 10))
+        if suspect is None:
+            self.log("aucune donnée, pas de vote")
+            return
         self.publier(f"iot/votes/{self.id}", {"votant": self.id, "suspect": suspect, "raison": raison})
-        self.publier(f"iot/chat/{self.id}", {"text": f"Je soupçonne {suspect}."})
-        print(f"[{self.id}] vote contre {suspect} : {raison}")
+        self.log(f"vote contre {partie.nom(suspect)} : {raison}")
+
+
+def expediteur(msg):
+    return msg.topic.split("/")[-1]
+
+
+def lire_json(payload):
+    try:
+        contenu = json.loads(payload)
+        return contenu if isinstance(contenu, dict) else {}
+    except ValueError:
+        return {}
 
 
 def main():
