@@ -105,7 +105,7 @@ function onMessage(conn, text) {
     case 'look': u.look = cleanLook(m.look); if (m.name) u.name = cleanText(m.name, 16) || u.name; broadcastHub(); if (hub.mode === 'table') table.addUser(u); return;
     case 'mode': if (isHost && (!hub.inGame || m.force)) setMode(m.mode); return;
     case 'tohub': if (isHost) setMode('hub'); return;
-    case 'hchat': { const t = cleanText(m.text); if (t) sendAllUsers({ t: 'hchat', from: u.id, name: u.name, text: t }); return; }
+    case 'hchat': { const t = cleanText(m.text); if (t) { sendAllUsers({ t: 'hchat', from: u.id, name: u.name, text: t }); if (!table.isActive()) agents.onTableChat({ kind: 'pub', from: u.id, name: u.name, text: t }); } return; }
   }
   if (hub.mode === 'table') table.onMessage(u, m);
 }

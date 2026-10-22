@@ -8,7 +8,7 @@ function remLen(n) { const out = []; do { let d = n % 128; n = Math.floor(n / 12
 const packet = (first, body) => Buffer.concat([Buffer.from([first]), remLen(body.length), body]);
 
 module.exports = function createMqtt({ host, port = 1883, clientId = 'classe-noire', keepAlive = 30, onMessage, onState, log = () => {} }) {
-  let sock = null, buf = Buffer.alloc(0), ok = false, pid = 1, timer = null, ping = null, stopped = false;
+  let sock = null, buf = Buffer.alloc(0), ok = false, pid = 1, timer = null, ping = null, stopped = false, errs = 0;
   const subs = new Set();
 
   function send(p) { if (sock && !sock.destroyed) sock.write(p); }
@@ -23,7 +23,7 @@ module.exports = function createMqtt({ host, port = 1883, clientId = 'classe-noi
       send(packet(0x10, Buffer.concat([str('MQTT'), Buffer.from([4, 2, keepAlive >> 8, keepAlive & 255]), str(clientId)])));
     });
     sock.on('data', d => { buf = Buffer.concat([buf, d]); parse(); });
-    sock.on('error', e => log(`MQTT : ${e.code || e.message}`));
+    sock.on('error', e => { if (errs++ % 10 === 0) log(`MQTT : ${e.code || e.message} (nouvelle tentative toutes les 3 s)`); });   // pas de spam si le broker est injoignable
     sock.on('close', () => {
       const was = ok; ok = false; clearInterval(ping); buf = Buffer.alloc(0);
       if (was && onState) onState(false);
@@ -41,7 +41,7 @@ module.exports = function createMqtt({ host, port = 1883, clientId = 'classe-noi
       buf = buf.subarray(i + len);
       if (type === 2) {                                           // CONNACK
         if (body[1] !== 0) { log(`MQTT : connexion refusée (code ${body[1]})`); sock.destroy(); return; }
-        ok = true; if (onState) onState(true);
+        ok = true; errs = 0; if (onState) onState(true);
         for (const t of subs) { send(subscribePacket(t)); pid = (pid % 65534) + 1; }
         clearInterval(ping); ping = setInterval(() => send(Buffer.from([0xc0, 0])), keepAlive * 500);
       } else if (type === 3) {                                    // PUBLISH

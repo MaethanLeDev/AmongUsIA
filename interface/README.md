@@ -21,8 +21,8 @@ Le dossier contient le jeu **Classe Noire** réduit à son salon 3D et à sa **t
 
 ```bash
 cd interface
-set MQTT_HOST=<ip du broker>     # facultatif : sans lui, seule l'API HTTP relie les Pi
-node server.js                   # puis http://localhost:3939
+node server.js                   # puis http://localhost:3939 — broker de Niels (10.109.150.215) par défaut
+# autre broker : set MQTT_HOST=<ip>    |    sans MQTT : set MQTT_HOST=off
 ```
 
 - Chaque Raspberry Pi qui s'annonce sur `iot/joueurs/<id>` devient un **personnage** 📡 à la table ronde.

@@ -23,12 +23,14 @@ Trois façons de brancher un Pi, au choix (elles se combinent) :
 ## 1. Lancer le salon avec le broker
 
 ```bash
-set MQTT_HOST=10.109.150.xx        # adresse du broker (Niels)   — sans cette variable, seul le mode HTTP marche
-set MQTT_PORT=1883                 # facultatif
-node server.js
+node server.js                     # utilise par défaut le broker de Niels : 10.109.150.215:1883 (broker/README.md)
 ```
 
-Console attendue : `[agents] connecté au broker 10.109.150.xx:1883`, puis `[agents] + rpi1 (mqtt)` à chaque Pi. Reconnexion automatique si le broker tombe.
+Autres réglages (variables d'environnement) : `MQTT_HOST=<ip>` pour changer de broker, `MQTT_PORT=1883`, `MQTT_HOST=off` pour ne garder que l'API HTTP.
+
+Console attendue : `[agents] connecté au broker 10.109.150.215:1883`, puis `[agents] + rpi1 (mqtt)` à chaque Pi. Reconnexion automatique si le broker tombe (un message d'erreur toutes les 30 s au plus).
+
+Le salon est **en lecture seule** sur les topics du TP : il ne publie que sur `iot/table/chat`. Les présences retenues (`retain`) des Pi déjà en ligne sont reçues dès l'abonnement, et le Last Will `{"en_ligne": false}` fait partir le personnage.
 
 ## 2. MQTT
 
@@ -37,7 +39,7 @@ Le salon s'abonne à `iot/joueurs/+`, `iot/chat/+`, `iot/capteurs/+/temperature`
 | Topic | Sens | Contenu | Effet dans le salon |
 |-------|------|---------|---------------------|
 | `iot/joueurs/<id>` | Pi → salon | `{"id":"rpi1","ville":"Annecy","en_ligne":true}` + champs facultatifs `"nom"` (nom affiché), `"arch"` (`stratege`, `vengeur`, `sourire`, `reine`, `ombre`, `prodige`), `"api"` (URL de l'agent, voir §4) | le personnage apparaît (`en_ligne:false` : il part). Sans `arch`, l'archétype est choisi d'après l'id |
-| `iot/chat/<id>` | Pi → salon | `{"text":"je trouve rpi2 louche"}` ; ajouter `"to":"rpi2"` pour chuchoter | message dans le chat de la table (phases lobby/négociation) |
+| `iot/chat/<id>` | Pi → salon | `{"text":"je trouve rpi2 louche"}` ; ajouter `"to":"rpi2"` pour chuchoter (seulement pendant une partie de table) | message dans le chat de la table (lobby/négociation), ou dans le chat du salon si aucune table n'est ouverte |
 | `iot/table/chat` | salon → Pi | `{"seq":7,"kind":"pub"\|"whisper"\|"rumor","from":2,"name":"rpi1","text":"…","to":0,"fromAgent":"rpi1"}` | publié à chaque message de la table : le Pi s'abonne pour **entendre** les autres (humains, pions, autres Pi) |
 | `iot/capteurs/<id>/temperature` | Pi → tous | message du protocole | mémorisée, visible dans `GET /api/agents` |
 | `iot/votes/<id>` | Pi → maître | message du protocole | affichée dans le chat de la table |
@@ -79,11 +81,12 @@ Un agent complet utilisant seulement ces routes et son Ollama local : [exemples/
 
 Le Pi expose déjà `POST /message {"message": "…"}` → `{"reponse": "…"}` (`~/agent/app.py`, modèle `qwen3:0.6b`). Si le joueur annonce `"api":"http://<ip du Pi>:5000"` (message de présence ou `join`), le salon envoie à ce Pi chaque message de la table et publie sa réponse comme message du joueur.
 
-Garde-fous : au plus une réponse toutes les 8 s par agent, une seule requête à la fois, uniquement pendant le lobby et la négociation, pas de réponse à soi-même ni aux rumeurs. Les chuchotements reçoivent un chuchotement en retour.
+Garde-fous : au plus une réponse toutes les 8 s par agent, une seule requête à la fois, uniquement dans le salon, le lobby et la négociation, pas de réponse à soi-même ni aux rumeurs. Les chuchotements reçoivent un chuchotement en retour. **Les agents se taisent après 6 messages d'agents d'affilée** : dès qu'un humain ou un pion reparle, la conversation repart (sinon deux LLM se répondraient sans fin).
 
 ## 5. Comment le jeu traite un Pi
 
 - Dans `server.js`, un Pi est un utilisateur sans WebSocket (`ext: true`). Il ne peut pas être hôte : l'hôte 👑 reste un humain.
 - À la table (`table.js`), il joue comme un pion 🤖 pour les actions (coopérer/trahir/observer, accusation) afin que la partie avance, mais **ses phrases viennent du Pi** : le chat automatique des pions est coupé pour lui.
 - Arrivée ou départ pendant une partie : le Pi attend la manche/partie suivante, ou reste « hors ligne » jusqu'à la fin.
+- Identifiants : `<id>` fait 1 à 32 caractères, sans espace ni `/` (comme le protocole) ; le nom affiché est tronqué à 16 caractères, sauf si le joueur envoie `"nom"`.
 - Limite connue : les décisions de jeu d'un Pi ne sont pas encore pilotées par son LLM, seulement son chat.
