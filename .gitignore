@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+joueur/config.json
+.vscode/
+node_modules/
