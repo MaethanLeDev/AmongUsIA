@@ -33,7 +33,7 @@ L'un d'eux est un espion qui publie de fausses valeurs. Les joueurs votent pour 
 
 ## Lancer une partie (prévu)
 
-1. Démarrer le broker (`broker/`).
+1. Démarrer le broker sur le serveur : `cd broker && docker compose up -d` (voir `broker/`).
 2. Sur chaque RPi : `cd joueur && cp config.example.json config.json`, régler `id` et `ville`, puis `python3 joueur.py`.
 3. Lancer `python3 maitre_du_jeu/maitre.py`.
 4. (Optionnel) Lancer l'interface.

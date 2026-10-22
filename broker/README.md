@@ -1,20 +1,26 @@
 # Broker MQTT — Niels
 
-- **Adresse** : `10.109.150.215`
+- **Adresse** : `10.109.150.215` (attribuée par DHCP, à vérifier à chaque séance avec `hostname -I`)
 - **Port** : `1883`
 - **Authentification** : aucune (`allow_anonymous true`, suffisant pour le TP)
 
-C'est l'adresse que tous les autres modules doivent renseigner dans leur config.
+C'est l'adresse que les joueurs doivent renseigner dans leur config.
+Le maître du jeu et l'interface, s'ils tournent sur la même machine que le broker, peuvent utiliser `localhost:1883`.
 
-## Installation sur un Raspberry Pi
+## Lancer
+
+Depuis ce dossier :
 
 ```bash
-sudo apt install mosquitto mosquitto-clients
-sudo cp mosquitto.conf /etc/mosquitto/conf.d/jeu.conf
-sudo systemctl restart mosquitto
+docker compose up -d
+docker compose logs -f      # voir les connexions
 ```
 
-Par défaut, Mosquitto 2 n'écoute qu'en local. `mosquitto.conf` l'ouvre au réseau sur le port 1883.
+Le port 1883 doit être libre. Si Mosquitto est aussi installé sur la machine, il faut le couper :
+`sudo systemctl disable --now mosquitto`.
+
+`mosquitto.conf` ouvre le broker au réseau et active la persistance : les messages retained
+(`iot/joueurs/<id>`, `iot/partie/etat`) sont conservés dans le volume `broker-data`.
 
 ## Tester à la main
 
