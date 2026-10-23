@@ -50,6 +50,7 @@ def lancer(commande, journal=None):
 
 def main():
     sys.stdout.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)  # console Windows : pas de plantage sur un emoji
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(description="Simulation d'une partie sur un seul PC",
                                      epilog="Les arguments après -- sont passés au maître du jeu.")
     parser.add_argument("--joueurs", type=int, default=5)
@@ -69,7 +70,11 @@ def main():
             processus.append(lancer(["outils/broker_dev.py"], dossier / "broker.log"))
         if not args.ollama:
             processus.append(lancer(["outils/faux_ollama.py", "--port", 11435], dossier / "ollama.log"))
-        time.sleep(1)
+        time.sleep(1.5)
+        if any(p.poll() is not None for p in processus):
+            # Port déjà pris : souvent une simulation précédente fermée sans Ctrl+C, dont les processus tournent encore
+            sys.exit("Le broker (port 1883) ou le faux Ollama (port 11435) n'a pas démarré : port déjà utilisé ?\n"
+                     f"Voir {dossier}. Arrêtez l'ancienne simulation (ou les python.exe restants) et relancez.")
 
         for i in range(n):
             nom, arch, personnalite = PERSONNAGES[i]

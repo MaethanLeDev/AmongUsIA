@@ -87,6 +87,7 @@ cd interface && set MQTT_HOST=localhost && node server.js
 ```
 
 puis ouvrir http://localhost:5050. `outils/simulation.py` lance un broker de test (`outils/broker_dev.py`), un faux Ollama (`outils/faux_ollama.py`), N joueurs et le maître.
+Arrêtez-la avec **Ctrl+C** dans son terminal : sous Windows, fermer la fenêtre autrement laisse tourner les joueurs en arrière-plan.
 Avec un vrai Ollama installé sur le PC : `--ollama http://127.0.0.1:11434 --modele qwen3:0.6b`. Les options sont détaillées en tête de `outils/simulation.py`.
 
 ## Dépannage

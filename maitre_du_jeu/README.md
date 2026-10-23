@@ -7,6 +7,7 @@ uv run maitre_du_jeu/maitre.py --tp   # le jeu de base du sujet : une manche, sa
 ```
 
 Il tourne sur n'importe quelle machine qui joint le broker (le Pi du broker convient très bien). Il enchaîne les parties tout seul : Ctrl+C pour l'arrêter.
+**Un seul maître à la fois** par broker : deux maîtres ont le même identifiant MQTT et se déconnectent l'un l'autre en boucle (« Connecté au broker » qui se répète).
 
 ## Options
 
