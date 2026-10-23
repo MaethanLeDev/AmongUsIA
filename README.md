@@ -90,6 +90,16 @@ puis ouvrir http://localhost:5050. `outils/simulation.py` lance un broker de tes
 Arrêtez-la avec **Ctrl+C** dans son terminal : sous Windows, fermer la fenêtre autrement laisse tourner les joueurs en arrière-plan.
 Avec un vrai Ollama installé sur le PC : `--ollama http://127.0.0.1:11434 --modele qwen3:0.6b`. Les options sont détaillées en tête de `outils/simulation.py`.
 
+## Intégration continue
+
+À chaque push et chaque PR, GitHub Actions ([.github/workflows/ci.yml](.github/workflows/ci.yml)) vérifie :
+- le lint Python (`uvx ruff check`, règles dans `pyproject.toml`) et la compilation de `joueur/`, `maitre_du_jeu/`, `outils/` ;
+- la syntaxe du code Node de `interface/` (hors `public/vendor/`) ;
+- le fichier `broker/docker-compose.yml` ;
+- une partie complète simulée (`outils/simulation.py --joueurs 3 --rapide -- --tp`), qui doit se finir par une victoire. En cas d'échec, les journaux des joueurs sont joints au run.
+
+Pas de déploiement automatique : les Pi sont sur le réseau de l'IUT, injoignables depuis GitHub.
+
 ## Dépannage
 
 | Problème                                               | Piste                                                                                          |

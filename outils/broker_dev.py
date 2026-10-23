@@ -88,7 +88,7 @@ class Broker:
                 elif genre == 14:
                     propre = True
                     break
-        except (asyncio.IncompleteReadError, asyncio.TimeoutError, ConnectionError, struct.error):
+        except (asyncio.IncompleteReadError, TimeoutError, ConnectionError, struct.error):
             pass
         finally:
             if self.clients.get(client.id) is client:

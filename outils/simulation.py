@@ -43,7 +43,7 @@ PERSONNAGES = [
 
 
 def lancer(commande, journal=None):
-    sortie = open(journal, "w", encoding="utf-8") if journal else None
+    sortie = open(journal, "w", encoding="utf-8") if journal else None  # noqa: SIM115 (reste ouvert pour le processus)
     return subprocess.Popen([sys.executable, "-u", *map(str, commande)], cwd=RACINE,
                             stdout=sortie, stderr=subprocess.STDOUT if sortie else None)
 
