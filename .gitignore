@@ -6,3 +6,7 @@ joueur/config.json
 .vscode/
 node_modules/
 maitre_du_jeu/stats.json
+
+# Claude Code (réglages personnels)
+.claude/settings.local.json
+CLAUDE.local.md
