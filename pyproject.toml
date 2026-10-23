@@ -1,12 +1,12 @@
 [project]
 name = "amongusia"
 version = "0.1.0"
-description = "Jeu distribué de l'espion : joueurs Raspberry Pi et maître du jeu communiquant par MQTT"
+description = "Jeu distribué de l'espion : agents IA sur Raspberry Pi, maître du jeu et interface 3D, reliés par MQTT"
 readme = "README.md"
 authors = [
     { name = "MaethanLeDev", email = "maethan.tordeux@etu.univ-smb.fr" }
 ]
-requires-python = ">=3.13"
+requires-python = ">=3.11"  # Raspberry Pi OS Bookworm : Python 3.11
 dependencies = [
     "paho-mqtt>=2.1.0",
     "requests>=2.34.2",

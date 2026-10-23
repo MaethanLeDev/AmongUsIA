@@ -2,7 +2,7 @@
   "id": "rpi1",
   "ville": "Annecy",
   "broker": {
-    "hote": "amongus.local",
+    "hote": "amongus.local,10.109.150.215",
     "port": 1883
   },
   "ollama": {
@@ -11,8 +11,13 @@
   },
   "personnalite": "Tu es un détective froid et méthodique. Tu cites toujours les chiffres et tu poses des questions pièges.",
   "strategie": "llm",
+  "memoire": "faits",
   "interface": {
     "nom": "Sherlock",
-    "arch": "stratege"
+    "arch": "stratege",
+    "couleurs": {"accent": "#c1121f"}
+  },
+  "api": {
+    "port": 5000
   }
 }
