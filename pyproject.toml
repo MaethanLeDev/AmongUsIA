@@ -1,0 +1,17 @@
+[project]
+name = "amongusia"
+version = "0.1.0"
+description = "Jeu distribué de l'espion : joueurs Raspberry Pi et maître du jeu communiquant par MQTT"
+readme = "README.md"
+authors = [
+    { name = "MaethanLeDev", email = "maethan.tordeux@etu.univ-smb.fr" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "paho-mqtt>=2.1.0",
+    "requests>=2.34.2",
+]
+
+# Ce sont des scripts (uv run joueur/joueur.py), pas un paquet à installer
+[tool.uv]
+package = false

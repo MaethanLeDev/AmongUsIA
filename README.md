@@ -31,9 +31,11 @@ L'un d'eux est un espion qui publie de fausses valeurs. Les joueurs votent pour 
 └──────────┘     └──────────┘       └──────────┘    └───────────┘
 ```
 
-## Lancer une partie (prévu)
+## Lancer une partie
+
+Les scripts Python utilisent [uv](https://docs.astral.sh/uv/) : `uv sync` à la racine installe les dépendances.
 
 1. Démarrer le broker sur le serveur : `cd broker && docker compose up -d` (voir `broker/`).
-2. Sur chaque RPi : `cd joueur && cp config.example.json config.json`, régler `id` et `ville`, puis `python3 joueur.py`.
-3. Lancer `python3 maitre_du_jeu/maitre.py`.
-4. (Optionnel) Lancer l'interface.
+2. Sur chaque RPi : `cp joueur/config.example.json joueur/config.json`, régler `id`, `ville` et `broker`, puis `uv run joueur/joueur.py`.
+3. Lancer `uv run maitre_du_jeu/maitre.py --broker <ip_broker>` et appuyer sur Entrée quand tous les joueurs sont là.
+4. (Optionnel) Lancer l'interface (`interface/`).
