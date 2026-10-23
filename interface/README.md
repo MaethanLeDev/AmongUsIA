@@ -1,33 +1,38 @@
-# Interface graphique — Valérian
+# Interface : la salle 3D des spectateurs
 
-Mettez ici l'interface dérivée de votre jeu de l'espace.
-
-Elle s'abonne au broker en **lecture seule** (`iot/#`) et affiche :
-
-- les joueurs connectés (`iot/joueurs/+`)
-- les températures publiées à chaque manche (`iot/capteurs/+/temperature`)
-- l'état de la partie (`iot/partie/etat`)
-- les votes et le résultat (`iot/votes/+`, `iot/partie/resultat`)
-
-Elle ne doit **pas** s'abonner à `iot/role/+` pendant la partie, sinon elle révèle l'espion, sauf en mode « spectateur omniscient ».
-
-Protocole : [../docs/protocole.md](../docs/protocole.md)
-
----
-
-## Base de code : Classe Noire
-
-Le dossier contient le jeu **Classe Noire** réduit à son salon 3D et à sa **table ronde**, comme base de l'interface (Node.js sans dépendance, rendu Three.js). Le mode « Mission 3D » du jeu d'origine a été retiré.
+Elle reprend le jeu **Classe Noire** de Valérian : sa salle, sa table ronde sous la lampe et ses personnages animés, dessinés à la main (Three.js, sans asset externe).
+Ici, ce sont les IA des Raspberry Pi qui sont assises à la table, et les spectateurs regardent la partie.
 
 ```bash
 cd interface
-node server.js                   # puis http://localhost:3939 — broker de Niels (10.109.150.215) par défaut
-# autre broker : set MQTT_HOST=<ip>    |    sans MQTT : set MQTT_HOST=off
+node server.js                        # broker amongus.local, sinon 10.109.150.215 ; port 5050
+set MQTT_HOST=10.109.150.215          # (Windows) autre broker — Linux/macOS : MQTT_HOST=... node server.js
+set PORT=8080                         # autre port
 ```
 
-- Mode **Espion** : suit la partie du TP (températures, votes, résultat) via MQTT.
-- Chaque Raspberry Pi qui s'annonce sur `iot/joueurs/<id>` devient un **personnage** 📡 à la table ronde.
-- Les agents IA discutent dans le chat de la table (MQTT `iot/chat/<id>` / `iot/table/chat`, ou API HTTP, ou appel de leur API Flask/Ollama).
-- Températures, votes et résultat du TP sont relayés dans le salon.
+Il faut Node.js 18 ou plus, sans `npm install` : aucune dépendance. Les spectateurs ouvrent l'adresse « Depuis le réseau » affichée dans la console.
 
-Fonctionnement détaillé, topics, API et exemple de code pour le Pi : [AGENTS.md](AGENTS.md). Jeu d'origine : [README_classe-noire.md](README_classe-noire.md).
+## Ce qu'on voit
+
+- **Arrivée** : chaque IA qui se connecte apparaît sur son siège, dans une colonne de lumière. Les sièges sont stables, puis répartis régulièrement autour de la table au début de chaque partie.
+- **Mesures** : une onde sur la table à chaque température publiée. Les valeurs s'affichent sous le nom de l'IA et dans sa carte, à gauche.
+- **Débat** : la caméra se tourne vers celle qui a la parole. « … » s'affiche pendant qu'elle réfléchit, puis une bulle avec sa phrase. Tout le débat reste lisible à droite.
+- **Vote** : un arc rouge va du votant à son suspect, avec le décompte en bas.
+- **Verdict** : l'IA éliminée se lève et est aspirée vers la lampe (lumière bleue si elle était innocente, rouge si c'était l'espion). Seule son étiquette reste sur sa chaise.
+- **Fin** : l'espion est révélé, avec les statistiques LLM contre calcul de l'extension du TP.
+
+Boutons en haut à droite : qualité graphique, caméra automatique (on peut aussi tourner à la souris et zoomer), son (il s'active au premier clic dans la page), règles.
+
+## Code
+
+| Fichier               | Rôle                                                                                         |
+|-----------------------|----------------------------------------------------------------------------------------------|
+| `server.js`           | HTTP statique + WebSocket maison (RFC 6455). `GET /api/etat` renvoie l'état reconstruit (débogage). |
+| `mqtt.js`             | client MQTT 3.1.1 minimal ; plusieurs brokers essayés à tour de rôle, reconnexion automatique   |
+| `spectacle.js`        | reconstruit la partie à partir des messages MQTT, attribue les sièges, prévient les navigateurs |
+| `public/main.js`      | panneaux, bandeau de phase, chronomètre ; branche les événements sur les animations            |
+| `public/hub3d.js`     | la salle 3D et les animations                                                                |
+| `public/chars.js`     | les personnages (6 archétypes, couleurs personnalisables)                                     |
+
+L'interface est **en lecture seule** : elle ne publie rien et ne s'abonne jamais à `iot/role/+`, sinon elle révélerait l'espion avant la fin.
+Le protocole est décrit dans [../docs/protocole.md](../docs/protocole.md).
