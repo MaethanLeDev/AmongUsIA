@@ -77,7 +77,7 @@ export function createHub() {
     const look = fullLook(u.look), char = createCharacter(look);
     char.setMode('sit'); scene.add(char.group);
     const tag = makeTag(u.name, u.id === myId ? '#ffd0d6' : '#ffffff'); tag.scale.set(1.0, 0.25, 1); scene.add(tag);
-    return { char, tag, sig: sigOf(u.look || {}), name: u.name, seat: 0, look };
+    return { char, tag, sig: sigOf(u.look || {}), name: u.name, seat: 0, look, sub: '', subColor: undefined };
   }
   api.setUsers = (users, me) => {
     myId = me;
@@ -86,7 +86,7 @@ export function createHub() {
     users.forEach((u, i) => {
       let a = avatars.get(u.id);
       if (!a || a.sig !== sigOf(u.look || {})) { if (a) { scene.remove(a.char.group); scene.remove(a.tag); } a = buildAvatar(u); avatars.set(u.id, a); }
-      else if (a.name !== u.name) { retag(a.tag, u.name, u.id === myId ? '#ffd0d6' : '#fff'); a.name = u.name; }
+      else if (a.name !== u.name) { a.name = u.name; retag(a.tag, u.name, a.subColor || (u.id === myId ? '#ffd0d6' : '#fff'), a.sub); }
       a.seat = i;
     });
     // répartition équilibrée autour de la table
@@ -96,6 +96,27 @@ export function createHub() {
       a.char.group.position.set(s.x, 0.02, s.z); a.char.group.rotation.y = s.a + Math.PI;
       a.tag.position.set(s.x * 1.12, 1.62 + 0.45, s.z * 1.12);
     });
+  };
+  // ligne de statut sous le nom (température, vote…) et bulle de dialogue au-dessus d'un personnage
+  api.setSub = (id, sub, color) => {
+    const a = avatars.get(id); if (!a || (a.sub === sub && a.subColor === color)) return;
+    a.sub = sub; a.subColor = color; retag(a.tag, a.name, color || (id === myId ? '#ffd0d6' : '#fff'), sub);
+  };
+  const bubbles = [];
+  api.say = (id, text) => {
+    const a = avatars.get(id); if (!a || !text) return;
+    const c = document.createElement('canvas'); c.width = 512; c.height = 192; const g = c.getContext('2d');
+    g.font = '600 30px "Segoe UI", sans-serif';
+    const lines = []; let cur = '';
+    for (const w of String(text).split(/s+/)) { if (g.measureText(cur + ' ' + w).width > 450 && cur) { lines.push(cur); cur = w; } else cur = cur ? cur + ' ' + w : w; }
+    lines.push(cur); if (lines.length > 4) { lines.length = 4; lines[3] = lines[3].replace(/.{0,3}$/, '…'); }
+    const hh = 24 + lines.length * 38;
+    g.fillStyle = 'rgba(13,13,19,.93)'; g.strokeStyle = '#d6182c'; g.lineWidth = 4; g.beginPath(); g.roundRect(8, 8, 496, hh, 18); g.fill(); g.stroke();
+    g.fillStyle = '#fff'; lines.forEach((l, i) => g.fillText(l, 28, 52 + i * 38));
+    const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
+    const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false, depthTest: false })); s.scale.set(2.2, 0.825, 1); s.center.set(0.5, 1 - (hh + 8) / 192); s.renderOrder = 11; scene.add(s);
+    const old = bubbles.findIndex(b => b.id === id); if (old >= 0) { scene.remove(bubbles[old].s); bubbles.splice(old, 1); }
+    bubbles.push({ id, s, until: performance.now() + 3500 + String(text).length * 60 });
   };
   api.setPreview = look => {
     if (previewChar) { scene.remove(previewChar.group); scene.remove(previewChar.tag); previewChar = null; }
@@ -118,6 +139,10 @@ export function createHub() {
     t += dt;
     if (!drag) orbit += dt * 0.07;
     for (const a of avatars.values()) a.char.update(dt, 0, t);
+    for (let i = bubbles.length - 1; i >= 0; i--) {
+      const b = bubbles[i], a = avatars.get(b.id);
+      if (!a || performance.now() > b.until) { scene.remove(b.s); bubbles.splice(i, 1); } else b.s.position.set(a.tag.position.x, a.tag.position.y + 0.3, a.tag.position.z);
+    }
     if (previewChar) { previewChar.char.update(dt, 0, t); previewChar.group.rotation.y += dt * 0.35; }
     const f = 1 + Math.sin(t * 9) * 0.15 + Math.sin(t * 23) * 0.08;
     flame.scale.setScalar(0.18 * f); cl.intensity = 4.5 + f * 1.5; lamp.intensity = 90 + Math.sin(t * 1.3) * 4;

@@ -5,19 +5,22 @@
 //  - Appel d'une API d'agent (ex. Flask + Ollama, route POST /message) pour le faire parler à la table
 const createMqtt = require('./mqtt.js');
 
-const ID_RE = /^[A-Za-z0-9_-]{1,16}$/;
+const ID_RE = /^[^s/#+]{1,32}$/;            // le protocole interdit seulement espace et /  (# et + sont réservés à MQTT)
+const DEFAULT_BROKER = '10.109.150.215';       // broker de Niels (broker/README.md) ; MQTT_HOST=off pour désactiver
+const MAX_AGENT_STREAK = 6;                    // après 6 messages d'agents d'affilée, ils se taisent jusqu'à ce qu'un humain/pion reparle
 const MAX_AGENTS = 8;
 const REPLY_MIN_MS = 8000;           // un agent API ne répond pas plus d'une fois toutes les 8 s (évite le bavardage infini)
 const REPLY_TIMEOUT_MS = 120000;     // un petit LLM sur Raspberry Pi peut être lent
 const CHAT_KEEP = 100;
 
-module.exports = function createAgents({ host, table, users, newId, cleanText, cleanLook, ARCHS, isInGame, broadcastHub, hubChat, reassignHost }) {
+module.exports = function createAgents({ host, table, espion, users, newId, cleanText, cleanLook, ARCHS, isInGame, broadcastHub, hubChat, reassignHost }) {
   const agents = new Map();          // id (texte, ex. "rpi1") -> { id, user, ville, api, via, temp, lastSeen, busy, lastReply, vote }
   const chatLog = [];                // derniers messages de la table, relisibles par GET /api/chat?since=N
-  let seq = 0, mqtt = null, brokerLabel = '';
+  let seq = 0, mqtt = null, brokerLabel = '', streak = 0;
   const log = s => console.log('  [agents] ' + s);
 
   const hashArch = id => ARCHS[[...id].reduce((a, c) => a + c.charCodeAt(0), 0) % ARCHS.length];
+  const list = () => [...agents.values()].map(a => ({ id: a.id, userId: a.user.id, name: a.user.name, ville: a.ville, online: a.user.connected }));
   const agentOfUser = uid => [...agents.values()].find(a => a.user.id === uid);
   const resolveTarget = to => {                       // "rpi2" (id d'agent) ou numéro de joueur de la table
     if (to == null || to === '') return 0;
@@ -27,7 +30,7 @@ module.exports = function createAgents({ host, table, users, newId, cleanText, c
 
   // ------------------------------------------------------------ présence : un Pi arrive = un personnage apparaît
   function join(id, info = {}, via = 'mqtt') {
-    if (!ID_RE.test(id)) return null;
+    if (!ID_RE.test(id)) { log(`id refusé : « ${String(id).slice(0, 40)} »`); return null; }
     let a = agents.get(id);
     if (!a) {
       if (agents.size >= MAX_AGENTS) return null;
@@ -42,7 +45,7 @@ module.exports = function createAgents({ host, table, users, newId, cleanText, c
     if (info.ville) a.ville = cleanText(info.ville, 30);
     if (info.api && /^https?:\/\/[\w.\-:]+(\/.*)?$/.test(info.api)) a.api = info.api.replace(/\/$/, '');
     if (info.nom) a.user.name = cleanText(info.nom, 16) || a.user.name;
-    reassignHost(); broadcastHub();
+    reassignHost(); broadcastHub(); espion.changed();
     if (table.isActive()) table.addUser(a.user);
     return a;
   }
@@ -52,7 +55,7 @@ module.exports = function createAgents({ host, table, users, newId, cleanText, c
     if (table.isActive()) table.onDisconnect(a.user);
     if (!isInGame()) { users.delete(a.user.id); agents.delete(id); }     // en pleine partie, il reste (hors ligne) jusqu'à la fin
     hubChat('📡 Salon', `${a.user.name} a quitté la classe.`);
-    reassignHost(); broadcastHub();
+    reassignHost(); broadcastHub(); espion.changed();
     return true;
   }
   function keepOnlyAgents() { for (const [id, u] of users) if (!u.ext) users.delete(id); }
@@ -62,16 +65,27 @@ module.exports = function createAgents({ host, table, users, newId, cleanText, c
     if (msg.kind === 'sys') return;
     const entry = { seq: ++seq, ts: Date.now(), kind: msg.kind, from: msg.from || 0, name: msg.name || '', text: msg.text, to: msg.to || 0, toName: msg.toName || '' };
     const fa = agentOfUser(entry.from); if (fa) entry.fromAgent = fa.id;
+    streak = fa ? streak + 1 : 0;
     chatLog.push(entry); if (chatLog.length > CHAT_KEEP) chatLog.shift();
     if (mqtt) mqtt.publish('iot/table/chat', entry);          // tous les agents abonnés entendent la table
     for (const a of agents.values()) if (a.api && a.user.connected) maybeReply(a, entry);
   }
 
+  // Un agent parle : à la table si une partie de table est ouverte, sinon dans le chat du salon (autour de la table ronde)
+  function say(a, text, toId) {
+    if (table.isActive()) return table.chatAs(a.user.id, text, toId);
+    if (toId) return false;                                    // pas de messages privés dans le salon : on ne le publie pas à tout le monde
+    text = cleanText(text); if (!text) return false;
+    hubChat(a.user.name, text, a.user.id);
+    onTableChat({ kind: 'pub', from: a.user.id, name: a.user.name, text });
+    return true;
+  }
+
   // Un agent exposant une API (POST <api>/message {"message": "..."} -> {"reponse": "..."}) répond au chat sans code de plus côté Pi.
   async function maybeReply(a, e) {
-    if (e.kind === 'rumor' || e.from === a.user.id || a.busy) return;
+    if (e.kind === 'rumor' || e.from === a.user.id || a.busy || streak > MAX_AGENT_STREAK) return;
     if (e.kind === 'whisper' && e.to !== a.user.id) return;
-    if (!['lobby', 'negotiate'].includes(table.phase())) return;
+    if (!['off', 'lobby', 'negotiate'].includes(table.phase())) return;     // 'off' = on est dans le salon (hub)
     if (Date.now() - a.lastReply < REPLY_MIN_MS) return;
     a.busy = true;
     try {
@@ -80,7 +94,7 @@ module.exports = function createAgents({ host, table, users, newId, cleanText, c
         body: JSON.stringify({ message: `${e.name}${e.kind === 'whisper' ? ' (en privé)' : ''} : ${e.text}` }), signal: AbortSignal.timeout(REPLY_TIMEOUT_MS),
       });
       const j = await r.json(); const txt = j.reponse || j.response;
-      if (txt && agents.get(a.id) === a) table.chatAs(a.user.id, txt, e.kind === 'whisper' ? e.from : 0);
+      if (txt && agents.get(a.id) === a) say(a, txt, e.kind === 'whisper' ? e.from : 0);
     } catch (err) { log(`${a.id} : API injoignable (${err.message})`); }
     a.busy = false; a.lastReply = Date.now();
   }
@@ -94,24 +108,24 @@ module.exports = function createAgents({ host, table, users, newId, cleanText, c
     } else if (t[1] === 'chat' && t[2]) {                      // {"text": "...", "to": "rpi2"}  (to facultatif = chuchotement)
       const a = agents.get(t[2]); if (!a) return;
       a.lastSeen = Date.now();
-      if (!table.chatAs(a.user.id, obj.text, resolveTarget(obj.to))) log(`${t[2]} : message ignoré (la table n'est pas en phase de discussion)`);
+      if (!say(a, obj.text, resolveTarget(obj.to))) log(`${t[2]} : message ignoré (la table n'est pas en phase de discussion)`);
     } else if (t[1] === 'capteurs' && t[3] === 'temperature') {
-      const a = agents.get(t[2]); if (a && typeof obj.temperature === 'number') { a.temp = { value: obj.temperature, manche: obj.manche, ville: obj.ville, ts: Date.now() }; a.lastSeen = Date.now(); }
+      const a = agents.get(t[2]); if (a && typeof obj.temperature === 'number') { a.temp = { value: obj.temperature, manche: obj.manche, ville: obj.ville, ts: Date.now() }; a.lastSeen = Date.now(); espion.onTemp(a.id, obj); }
     } else if (t[1] === 'votes' && t[2]) {
       const a = agents.get(t[2]); if (!a) return;
-      a.vote = { suspect: obj.suspect, raison: obj.raison };
+      a.vote = { suspect: obj.suspect, raison: obj.raison }; espion.onVote(a.id, obj);
       table.info(`🗳 ${a.user.name} soupçonne ${obj.suspect}${obj.raison ? ' : ' + cleanText(obj.raison, 120) : ''}`);
     } else if (t[1] === 'partie' && t[2] === 'resultat') {
       const txt = `Résultat du TP : l'espion était ${obj.espion}, désigné ${obj.designe} → victoire des ${obj.gagnant}.`;
-      table.info('🏁 ' + txt); hubChat('📡 MQTT', txt);
+      espion.onResultat(obj); table.info('🏁 ' + txt); hubChat('📡 MQTT', txt);
     } else if (t[1] === 'partie' && t[2] === 'etat') {
-      hubChat('📡 MQTT', `Partie du TP : ${obj.etat}.`);
+      espion.onEtat(obj);
     }
   }
 
   function start() {
-    const h = process.env.MQTT_HOST;
-    if (!h) { log('MQTT désactivé (définis MQTT_HOST=<ip du broker> pour relier les Raspberry Pi). L\'API /api/... reste disponible.'); return; }
+    const h = process.env.MQTT_HOST || DEFAULT_BROKER;
+    if (h === 'off') { log('MQTT désactivé (MQTT_HOST=off). L\'API /api/... reste disponible.'); return; }
     const port = Number(process.env.MQTT_PORT) || 1883; brokerLabel = `${h}:${port}`;
     mqtt = createMqtt({
       host: h, port, clientId: 'classe-noire-' + Math.random().toString(16).slice(2, 8), log,
@@ -148,11 +162,11 @@ module.exports = function createAgents({ host, table, users, newId, cleanText, c
       if (t[3] === 'chat') {
         const a = agents.get(t[2]); if (!a) return json(res, 404, { erreur: 'agent inconnu : fais d\'abord /join' });
         a.lastSeen = Date.now();
-        return json(res, 200, { ok: table.chatAs(a.user.id, body.text, resolveTarget(body.to)) });
+        return json(res, 200, { ok: say(a, body.text, resolveTarget(body.to)) });
       }
     }
     json(res, 404, { erreur: 'route inconnue' });
   }
 
-  return { start, http, onTableChat, keepOnlyAgents, join, leave, status };
+  return { list, start, http, onTableChat, say, keepOnlyAgents, join, leave, status };
 };
