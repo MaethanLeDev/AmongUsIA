@@ -18,6 +18,8 @@ import tempfile
 import time
 from pathlib import Path
 
+import requests
+
 RACINE = Path(__file__).resolve().parent.parent
 
 # Des villes voisines d'Annecy (le sujet demande des villes adjacentes), avec leurs coordonnées
@@ -47,6 +49,21 @@ def lancer(commande, journal=None):
                             stdout=sortie, stderr=subprocess.STDOUT if sortie else None)
 
 
+def verifier_ollama(url, modele):
+    """Sans Ollama, toutes les IA diraient leur phrase de secours : mieux vaut s'arrêter tout de suite et expliquer."""
+    try:
+        reponse = requests.get(f"{url}/api/tags", timeout=5)
+        reponse.raise_for_status()
+        installes = [m.get("name", "") for m in reponse.json().get("models", [])]
+    except (requests.RequestException, ValueError) as erreur:
+        sys.exit(f"Ollama ne répond pas sur {url} ({erreur.__class__.__name__}).\n"
+                 "Installez-le (https://ollama.com/download), lancez-le, puis vérifiez : curl " + url + "/api/tags")
+    if modele not in installes and f"{modele}:latest" not in installes:
+        sys.exit(f"Le modèle {modele} n'est pas installé dans Ollama : ollama pull {modele}\n"
+                 f"Modèles installés : {', '.join(installes) or 'aucun'}")
+    print(f"Ollama prêt sur {url}, modèle {modele}.")
+
+
 def main():
     sys.stdout.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)  # console Windows : pas de plantage sur un emoji
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
@@ -61,6 +78,8 @@ def main():
     args, pour_le_maitre = parser.parse_known_args()
     pour_le_maitre = [a for a in pour_le_maitre if a != "--"]
     n = max(2, min(args.joueurs, len(PERSONNAGES)))
+    if args.ollama:
+        verifier_ollama(args.ollama.rstrip("/"), args.modele)
 
     dossier = Path(tempfile.mkdtemp(prefix="amongusia-"))
     processus = []

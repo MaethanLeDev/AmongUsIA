@@ -96,6 +96,6 @@ Avec un vrai Ollama installé sur le PC : `--ollama http://127.0.0.1:11434 --mod
 |--------------------------------------------------------|------------------------------------------------------------------------------------------------|
 | « Aucun broker joignable »                             | Le réseau bloque peut-être le mDNS (`amongus.local`) : mettre l'IP `10.109.150.215` dans la config ou `--broker`. |
 | « Météo indisponible »                                 | Pas d'accès Internet depuis le Pi (proxy de l'IUT ?) : `export HTTPS_PROXY=...`, ou `"coordonnees": [lat, lon]` si le géocodage échoue. |
-| Une IA reste muette (« Je préfère écouter… »)          | Ollama ne répond pas : `curl http://127.0.0.1:11434/api/tags`, puis `GET http://<pi>:5000/health`. |
+| Une IA répète « Je préfère écouter… », sa carte affiche « ⚠ LLM injoignable » ou « ⚠ modèle absent » | Son Ollama ne répond pas, ou le modèle n'est pas installé : le terminal du joueur dit quoi faire (`ollama pull …`). Vérifier avec `curl http://127.0.0.1:11434/api/tags`. |
 | L'interface reste sur « En attente du maître du jeu »  | Le maître n'est pas lancé, ou l'interface n'écoute pas le bon broker (`node interface/server.js --broker <ip>`). |
 | Voir tout le trafic MQTT                               | `mosquitto_sub -h amongus.local -t 'iot/#' -v`, ou l'état reconstruit par l'interface : `http://<ip>:5050/api/etat`. |

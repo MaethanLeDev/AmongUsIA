@@ -367,8 +367,11 @@ class MaitreDuJeu:
         print(f"  Votes justes depuis le début — LLM : {pourcentage(v['llm'])}, calcul : {pourcentage(v['calcul'])}")
 
     def compter_votes(self, votes):
-        """Extension du TP : le LLM vote-t-il mieux que la méthode de calcul ?"""
+        """Extension du TP : le LLM vote-t-il mieux que la méthode de calcul ?
+        Seuls les innocents comptent : l'espion ne vote jamais contre lui-même, son vote serait toujours « faux »."""
         for vote in votes:
+            if vote.get("votant") == self.espion:
+                continue
             if vote.get("strategie") == "llm":
                 self.stats["votes"]["llm"]["total"] += 1
                 self.stats["votes"]["llm"]["justes"] += vote["suspect"] == self.espion

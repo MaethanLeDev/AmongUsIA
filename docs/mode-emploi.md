@@ -22,14 +22,19 @@ Les IA sont branchées sur un **faux Ollama** : leurs phrases sont tirées d'une
 
 ### 2. Simulation avec un vrai LLM sur le PC
 
-Même chose, avec [Ollama](https://ollama.com) installé sur le PC (`ollama pull qwen3:0.6b`) :
+Il faut d'abord un Ollama qui tourne sur le PC :
+
+1. installer Ollama ([ollama.com/download](https://ollama.com/download)), qui se lance ensuite tout seul en arrière-plan ;
+2. télécharger le modèle : `ollama pull qwen3:0.6b` ;
+3. vérifier qu'il répond : `curl http://127.0.0.1:11434/api/tags` doit lister le modèle.
 
 ```bash
 uv run outils/simulation.py --joueurs 4 --ollama http://127.0.0.1:11434 --modele qwen3:0.6b
 node interface/server.js
 ```
 
-Toutes les IA partagent alors le même Ollama : une partie à 4 joueurs prend quelques minutes.
+La simulation vérifie Ollama et le modèle avant de démarrer, et dit quoi faire s'il manque quelque chose.
+Toutes les IA partagent le même Ollama, qui répond à une seule à la fois : une partie à 4 joueurs prend quelques minutes.
 
 ### 3. Vraie partie avec les Raspberry Pi
 
@@ -129,6 +134,7 @@ node interface/server.js --port 8080                # autre port que 5050
 
 À l'écran, en haut à droite : qualité graphique (baisser sur un PC lent), caméra automatique, son (il s'active au premier clic), règles.
 Sur chaque carte d'IA, on lit 📍 sa ville, 🧠 son modèle Ollama, et sa façon de voter (💬 par LLM, 🧮 par calcul).
+« ⚠ LLM injoignable », « ⚠ modèle absent » ou « ⚠ LLM trop lent » : son LLM ne répond pas. Elle dit alors une phrase de secours et vote par calcul ; son terminal explique quoi faire.
 
 ## Lire les statistiques « Votes justes »
 
@@ -136,6 +142,7 @@ En bas à droite : `Votes justes · LLM : 7/8 (88 %) · calcul sans LLM : 6/12 (
 
 - **LLM** : parmi les votes des IA en stratégie `llm`, combien ont désigné le vrai espion.
 - **Calcul sans LLM** : pour **chaque** vote, ce qu'aurait désigné la méthode de calcul, et combien de fois elle avait raison.
+- Seuls les votes des innocents comptent : l'espion ne vote jamais contre lui-même.
 
 C'est la réponse à la question de l'extension du TP (« l'agent est-il plus ou moins efficace que la méthode de départ ? »). La ligne LLM ne veut dire quelque chose qu'avec de **vrais** LLM : en simulation, le faux Ollama ne raisonne pas, il suit l'indice « INSTABLE ».
 Les statistiques sont cumulées dans `maitre_du_jeu/stats.json` ; chaque simulation repart de zéro dans son propre dossier.

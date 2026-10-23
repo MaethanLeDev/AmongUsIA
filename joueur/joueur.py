@@ -35,6 +35,7 @@ class Joueur:
         self.id = config["id"]
         self.meteo = Meteo(config["ville"], config.get("coordonnees"))
         self.ia = IA(config)
+        self.ia.quand_etat_change = self._llm_change
         self.verrou = threading.Lock()
         self.noms, self.villes = {}, {}   # de chaque joueur vu, gardés même s'il se déconnecte
         self.etat = {}                    # dernier message iot/partie/etat
@@ -76,6 +77,7 @@ class Joueur:
             except OSError as erreur:
                 self.log(f"API non démarrée, port {port} occupé ? ({erreur})")
         self.en_arriere_plan(self.meteo.temperature)  # géocode tout de suite : une ville introuvable se voit au lancement
+        self.en_arriere_plan(self.verifier_llm)       # de même pour un Ollama arrêté ou un modèle pas installé
         try:
             self.client.loop_forever()
         except KeyboardInterrupt:
@@ -101,7 +103,21 @@ class Joueur:
         presence.update(self.config.get("interface", {}))  # nom, arch, couleurs
         if self.url_api:
             presence["api"] = self.url_api
+        if self.ia.etat_llm:
+            presence["llm"] = self.ia.etat_llm  # l'interface affiche « ⚠ LLM injoignable » sur la carte de l'IA
         self.publier(f"iot/joueurs/{self.id}", presence, retain=True)
+
+    def verifier_llm(self):
+        alerte = self.ia.verifier()
+        if alerte:
+            self.log(f"⚠ {alerte}. En attendant, cette IA passera son tour au débat et votera par calcul.")
+        else:
+            self.log(f"Ollama prêt, modèle {self.ia.modele}")
+
+    def _llm_change(self, etat):
+        """Le LLM répond de nouveau, ou plus : on le dit à tout le monde (l'interface l'affiche)."""
+        if self.client.is_connected():
+            self.annoncer_presence()
 
     def _on_presence(self, client, userdata, msg):
         presence = lire_json(msg.payload)
@@ -321,7 +337,8 @@ class Joueur:
         }
 
     def sante(self):
-        return {"status": "ok", "id": self.id, "broker": self.client.is_connected(), "ollama": self.ia.disponible()}
+        return {"status": "ok", "id": self.id, "broker": self.client.is_connected(), "ollama": self.ia.disponible(),
+                "llm": self.ia.etat_llm}
 
 
 def connecter(client, hotes, port):

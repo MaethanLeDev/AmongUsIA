@@ -68,7 +68,7 @@ def main():
 
     class Gestionnaire(BaseHTTPRequestHandler):
         def do_GET(self):
-            self.envoyer({"models": [{"name": "faux:latest"}]})
+            self.envoyer({"models": [{"name": "simulé"}]})  # le nom de modèle que outils/simulation.py donne aux joueurs
 
         def do_POST(self):
             corps = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")

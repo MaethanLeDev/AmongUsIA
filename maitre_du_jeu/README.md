@@ -45,4 +45,6 @@ Chaque vote contient le suspect choisi (`suspect`) et celui de la méthode de ca
 - `llm` : les votes des joueurs en stratégie `llm` ;
 - `calcul` : ce qu'aurait voté la méthode sans LLM, pour **tous** les votes.
 
+Seuls les votes des innocents sont comptés : l'espion ne vote jamais contre lui-même, son vote serait toujours « faux ».
+
 C'est la réponse chiffrée à la question de l'extension du TP. Elle s'affiche dans la console, dans `stats.json` et dans l'interface.

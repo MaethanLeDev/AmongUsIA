@@ -3,8 +3,10 @@
 Tout ce qui se personnalise (modèle, personnalité, mémoire) vient de config.json.
 """
 import json
+import random
 import re
 import statistics
+import time
 
 import requests
 
@@ -24,8 +26,9 @@ Ne commence pas par ton nom. Appelle les autres joueurs par leur nom et appuie-t
 
 ROLES = {
     "normal": "Ton rôle secret : CAPTEUR HONNÊTE. Tes températures sont vraies. "
-              "Une vraie température change très peu en 25 secondes : méfie-toi de celui dont les valeurs "
-              "sautent d'une mesure à l'autre ou s'écartent nettement des autres.",
+              "Un capteur honnête garde le même écart avec les autres d'une mesure à l'autre : sa ville est juste "
+              "plus chaude ou plus froide, c'est normal. Méfie-toi de celui dont l'écart avec les autres CHANGE "
+              "à chaque mesure.",
     "espion": "Ton rôle secret : ESPION. Tes températures sont fausses. Ne l'avoue jamais et ne te désigne jamais "
               "comme espion. Justifie tes valeurs (microclimat, capteur au soleil, altitude…) et détourne "
               "les soupçons vers un autre joueur, de façon crédible.",
@@ -36,7 +39,14 @@ Ta personnalité : {personnalite}
 Réponds en français, en 1 à 4 phrases, sans markdown. Tu te souviens de toute la conversation."""
 
 REPLI_PAROLE = "Je préfère écouter les autres avant de me prononcer."
-SEUIL_STABLE = 0.5  # °C : une vraie température varie moins que ça en 25 s
+# Quand le LLM ne répond pas, ou ne fait que répéter : l'IA parle quand même, avec les chiffres du calcul
+SECOURS = [
+    "Je me méfie de {x} : {raison}.",
+    "{x}, explique-toi : {raison}. Un vrai capteur ne fait pas ça.",
+    "Regardez les chiffres de {x} : {raison}.",
+    "Pour moi, c'est {x} qu'il faut surveiller : {raison}.",
+]
+SEUIL_STABLE = 0.5  # °C : l'écart d'un capteur honnête aux autres varie moins que ça en 25 s
 CITATION = 110      # caractères gardés de chaque réplique d'une manche passée
 # Un petit modèle se trahit (ou s'accuse à tort) facilement : on remplace ces phrases
 AVEU = re.compile(r"\bje suis\s+(l['’]\s*|un |le )?espion", re.IGNORECASE)
@@ -83,7 +93,11 @@ class Partie:
 # --- Analyse des températures --------------------------------------------
 
 def analyser(mesures):
-    """Pour chaque joueur : écart moyen à la médiane des autres (°C, signé) et amplitude de ses valeurs."""
+    """Pour chaque joueur, à partir de son écart à la médiane des autres à chaque échange :
+    - ecart : sa moyenne (°C, signé). Des villes voisines peuvent avoir plusieurs degrés d'écart : ce n'est pas suspect.
+    - variation : de combien cet écart change d'un échange à l'autre. Un capteur honnête garde le même écart,
+      même si la météo change (tout le monde bouge ensemble) ; l'espion, qui invente ses valeurs, non.
+    - amplitude : de combien ses propres valeurs changent (départage les ex aequo)."""
     analyse = {}
     for id_joueur, valeurs in mesures.items():
         ecarts = []
@@ -93,20 +107,22 @@ def analyser(mesures):
                 ecarts.append(valeur - statistics.median(autres))
         analyse[id_joueur] = {
             "ecart": statistics.mean(ecarts) if ecarts else 0.0,
+            "variation": max(ecarts) - min(ecarts) if ecarts else 0.0,
             "amplitude": max(valeurs) - min(valeurs) if valeurs else 0.0,
         }
     return analyse
 
 
 def suspect_par_calcul(partie):
-    """Méthode sans LLM (jeu de base du TP) : le plus gros écart + la plus grosse amplitude, parmi les vivants."""
+    """Méthode sans LLM (jeu de base du TP) : celui dont l'écart aux autres varie le plus, parmi les vivants.
+    (Sur 40 manches enregistrées, elle trouve l'espion à chaque fois ; l'ancienne, écart + amplitude, 58 % du temps.)"""
     mesures = {i: v for i, v in partie.manche().mesures.items() if v and (i in partie.vivants or not partie.vivants)}
     analyse = analyser(mesures)
-    score = {i: abs(a["ecart"]) + a["amplitude"] for i, a in analyse.items() if i in partie.autres()}
+    score = {i: (a["variation"], a["amplitude"]) for i, a in analyse.items() if i in partie.autres()}
     if not score:
         return None, "aucune donnée"
     suspect = max(score, key=score.get)
-    return suspect, f"écart {analyse[suspect]['ecart']:+.1f} °C, amplitude {analyse[suspect]['amplitude']:.1f} °C"
+    return suspect, f"son écart aux autres change de {analyse[suspect]['variation']:.1f} °C d'une mesure à l'autre"
 
 
 def tableau_mesures(partie):
@@ -121,10 +137,12 @@ def tableau_mesures(partie):
         a = analyse[id_joueur]
         moi = " (toi)" if id_joueur == partie.moi else ""
         # Les petits modèles lisent mal les chiffres : on leur traduit l'essentiel en mots
-        stabilite = "STABLE" if a["amplitude"] < SEUIL_STABLE else f"INSTABLE, varie de {a['amplitude']:.1f} °C"
+        if a["variation"] < SEUIL_STABLE:
+            verdict = f"STABLE : écart constant de {a['ecart']:+.1f} °C avec les autres (ville différente, c'est normal)"
+        else:
+            verdict = f"INSTABLE : son écart avec les autres change de {a['variation']:.1f} °C d'une mesure à l'autre"
         lignes.append(f"- {partie.nom(id_joueur)}{moi}, {partie.villes.get(id_joueur, '?')} : "
-                      f"{', '.join(f'{v:.1f}' for v in valeurs)} °C → {stabilite}, "
-                      f"écart aux autres {a['ecart']:+.1f} °C")
+                      f"{', '.join(f'{v:.1f}' for v in valeurs)} °C → {verdict}")
     return "\n".join(lignes)
 
 
@@ -196,6 +214,32 @@ class IA:
         self.modele = config["ollama"]["modele"]
         self.strategie = config.get("strategie", "llm")
         self.memoire = config.get("memoire", "faits")
+        # État du LLM, affiché par l'interface : ok, injoignable, modele_absent, trop_lent, erreur (None : pas encore testé)
+        self.etat_llm = None
+        self.quand_etat_change = None  # le joueur republie sa présence quand l'état change
+
+    def _noter(self, etat):
+        if etat != self.etat_llm:
+            self.etat_llm = etat
+            if self.quand_etat_change:
+                self.quand_etat_change(etat)
+
+    def verifier(self):
+        """Ollama répond-il, et le modèle est-il installé ? Renvoie None si tout va bien, sinon ce qu'il faut faire."""
+        try:
+            reponse = requests.get(f"{self.url}/api/tags", timeout=5)
+            reponse.raise_for_status()
+            installes = [m.get("name", "") for m in reponse.json().get("models", [])]
+        except (requests.RequestException, ValueError):
+            self._noter("injoignable")
+            return (f"Ollama ne répond pas sur {self.url} : installez-le (https://ollama.com/download) et lancez-le, "
+                    "ou corrigez \"ollama.url\" dans config.json")
+        if self.modele not in installes and f"{self.modele}:latest" not in installes:
+            self._noter("modele_absent")
+            return (f"le modèle {self.modele} n'est pas installé : ollama pull {self.modele}"
+                    f" (installés : {', '.join(installes) or 'aucun'})")
+        self._noter("ok")
+        return None
 
     def discuter(self, messages, delai, max_tokens, json_attendu=False, temperature=0.8):
         """Un appel à Ollama (/api/chat). Lève requests.RequestException si Ollama ne répond pas."""
@@ -212,9 +256,24 @@ class IA:
         }
         if json_attendu:
             corps["format"] = "json"
-        reponse = requests.post(f"{self.url}/api/chat", json=corps, timeout=delai)
-        reponse.raise_for_status()
-        return reponse.json()["message"]["content"]
+        try:
+            reponse = requests.post(f"{self.url}/api/chat", json=corps, timeout=delai)
+            reponse.raise_for_status()
+            contenu = reponse.json()["message"]["content"]
+        except requests.ConnectionError:   # avant Timeout : ConnectTimeout est les deux, et veut dire « injoignable »
+            self._noter("injoignable")
+            raise
+        except requests.Timeout:
+            self._noter("trop_lent")
+            raise
+        except requests.HTTPError as erreur:
+            self._noter("modele_absent" if erreur.response is not None and erreur.response.status_code == 404 else "erreur")
+            raise
+        except (ValueError, KeyError, TypeError) as erreur:
+            self._noter("erreur")
+            raise requests.RequestException(f"réponse d'Ollama illisible ({erreur})") from erreur
+        self._noter("ok")
+        return contenu
 
     def disponible(self):
         try:
@@ -237,16 +296,28 @@ class IA:
         return self.discuter(messages, delai, max_tokens, json_attendu, temperature)
 
     def parler(self, partie, tour, tours, delai):
+        """Une réplique pour le débat. Un petit modèle écrit souvent tout un dialogue, ou recopie les autres :
+        on ne garde que sa propre réplique, on lui redemande une fois si elle répète, sinon on parle avec les chiffres."""
         consigne = (f"C'est ton tour de parler (tour {tour}/{tours}). Réagis à ce qui vient d'être dit : "
-                    "accuse, défends-toi ou pose une question à quelqu'un.")
-        try:
-            texte = nettoyer(self._demander(partie, consigne, delai, max_tokens=120))
-        except requests.RequestException as erreur:
-            print(f"  LLM indisponible ({erreur})")
-            return REPLI_PAROLE
-        if not texte or AVEU.search(texte):
-            return REPLI_PAROLE
-        return texte
+                    "accuse, défends-toi ou pose une question à quelqu'un.\n"
+                    f"Écris UNE seule réplique, la tienne ({self.nom}), avec tes propres mots. "
+                    "N'écris pas les répliques des autres et ne répète pas ce qui a déjà été dit.")
+        noms = [partie.nom(i) for i in partie.participants or partie.vivants] + list(partie.participants)
+        debut = time.monotonic()
+        for essai in range(2):
+            reste = delai - (time.monotonic() - debut)
+            if reste < 8:
+                break
+            try:
+                brut = self._demander(partie, consigne, reste, max_tokens=120, temperature=0.8 + 0.3 * essai)
+            except requests.RequestException as erreur:
+                print(f"  LLM indisponible ({erreur})")
+                break
+            texte = premiere_replique(brut, noms, self.nom)
+            if texte and not AVEU.search(texte) and not deja_dit(texte, partie.manche().debat):
+                return texte
+            consigne += "\nAttention : ta réponse répétait ce qui a déjà été dit. Dis quelque chose de NOUVEAU."
+        return replique_de_secours(partie)
 
     def voter(self, partie, delai):
         """Renvoie (suspect, raison, calcul). calcul = le suspect de la méthode sans LLM, pour comparer (extension du TP).
@@ -300,6 +371,43 @@ def nettoyer(texte, limite=400):
     texte = re.sub(r"^\s*\**[\w\- ]{1,20}\**\s*:\s*", "", texte.strip())  # « Sherlock : … » ou « Mimi : … »
     texte = " ".join(texte.replace("*", "").split()).strip('"« »')
     return texte[:limite]
+
+
+def premiere_replique(brut, noms, moi):
+    """Ne garde que la réplique de l'IA quand le modèle a écrit tout un dialogue, par exemple
+    « - Mimi : « … » - Kaito : « … » », ou une réplique par ligne."""
+    texte = re.sub(r"<think>.*?(</think>|$)", "", brut, flags=re.DOTALL)
+    qui = "|".join(re.escape(n) for n in sorted({n for n in noms if n}, key=len, reverse=True)) or r"\w+"
+    prefixe = re.compile(rf"^[\s\-–•*«\"]*\**\s*(?:{qui})\s*\**\s*:\s*", re.IGNORECASE)
+    replique = ""
+    for ligne in texte.splitlines():
+        while prefixe.match(ligne):
+            ligne = prefixe.sub("", ligne, count=1)
+        ligne = ligne.strip(" -–•*«»\"")
+        if ligne:
+            replique = ligne
+            break
+    # Sur une même ligne, la réplique suivante commence par « - Nom : » ou « Nom : « »
+    replique = re.split(rf"\s[-–]\s*(?:{qui})\s*:|[»\"]\s*[-–]\s|\s(?:{qui})\s*:\s*[«\"]", replique, flags=re.IGNORECASE)[0]
+    replique = re.sub(rf"^{re.escape(moi)}\s*,\s*", "", replique.strip(" -–•*«»\""), flags=re.IGNORECASE)  # « Mimi, … » dit par Mimi
+    replique = nettoyer(replique)
+    return replique[:1].upper() + replique[1:]
+
+
+def deja_dit(texte, debat):
+    """Vrai si la réplique reprend presque mot pour mot une réplique déjà dite (les petits modèles recopient)."""
+    mots = set(re.findall(r"\w{3,}", texte.lower()))
+    if len(mots) < 4:
+        return False
+    return any(len(mots & set(re.findall(r"\w{3,}", ancien.lower()))) >= 0.7 * len(mots) for _, ancien in debat)
+
+
+def replique_de_secours(partie):
+    """L'IA parle quand même, avec les chiffres : mieux qu'une phrase vide répétée par tout le monde."""
+    suspect, raison = suspect_par_calcul(partie)
+    if suspect is None:
+        return REPLI_PAROLE
+    return random.choice(SECOURS).format(x=partie.nom(suspect), raison=raison)
 
 
 def lire_vote(brut, candidats):

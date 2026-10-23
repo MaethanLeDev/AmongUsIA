@@ -101,6 +101,7 @@ $('btnCam').onclick = () => { camAuto = !camAuto; store.set('cn_cam', camAuto ? 
 let S = null, chat = [], decalage = 0, derniereManche = 0;   // decalage : horloge du navigateur moins celle du serveur
 const EN_JEU = ['mesures', 'debat', 'vote', 'verdict'];
 const VAINQUEURS = { capteurs: 'Les innocents gagnent', espion: 'L\'espion gagne' };   // "capteurs" dans le protocole (vocabulaire du sujet)
+const ALERTES_LLM = { injoignable: '⚠ LLM injoignable', modele_absent: '⚠ modèle absent', trop_lent: '⚠ LLM trop lent', erreur: '⚠ erreur LLM' };
 const nom = id => (S && S.joueurs[id] && S.joueurs[id].nom) || id || '?';
 const couleur = id => { const j = S && S.joueurs[id]; return (j && (j.couleurs.accent || (ARCHETYPES[j.arch] || {}).accent)) || '#c1121f'; };
 const enJeu = () => EN_JEU.includes(S.partie.etat);
@@ -214,6 +215,7 @@ function majPanneaux() {
     const temps = S.mesures[j.id] || [], vote = S.votes[j.id], e = P.elimines.find(x => x.id === j.id);
     const chips = [];
     if (r && r.espion === j.id) chips.push(['🕵 espion', 'warn']);
+    if (ALERTES_LLM[j.llm] && j.en_ligne) chips.push([ALERTES_LLM[j.llm], 'warn', 'Son LLM ne répond pas : l\'IA passe son tour au débat et vote par calcul. Voir le terminal du joueur.']);
     if (!j.en_ligne) chips.push(['hors ligne', '']);
     else if (elim.has(j.id)) chips.push([`éliminé · manche ${e ? e.manche : '?'}`, '']);
     else if (S.parole && S.parole.joueur === j.id) chips.push([S.parole.parle ? '💬 parle' : '… réfléchit', 'ok']);
@@ -222,7 +224,7 @@ function majPanneaux() {
     if (compte[j.id] && ['vote', 'verdict'].includes(P.etat)) chips.push([`${compte[j.id]} vote${compte[j.id] > 1 ? 's' : ''} contre`, 'warn']);
     box.append(h('div', { class: 'pcard' + (elim.has(j.id) || !j.en_ligne ? ' off' : '') + (S.parole && S.parole.joueur === j.id ? ' parle' : '') },
       h('div', { class: 'top' }, h('span', { class: 'dot', style: `background:${couleur(j.id)}` }), h('span', { class: 'nm', text: j.nom }),
-        ...chips.map(([t, c]) => h('span', { class: 'chip ' + c, text: t }))),
+        ...chips.map(([t, c, info]) => h('span', { class: 'chip ' + c, text: t, title: info }))),
       h('div', { class: 'sub', title: 'Ville du capteur · modèle Ollama de l\'IA · façon de voter (LLM, ou calcul sans LLM)',
         text: [j.ville && '📍 ' + j.ville, j.modele && '🧠 ' + j.modele, j.strategie === 'ecart' ? '🧮 vote par calcul' : j.strategie === 'llm' ? '💬 vote par LLM' : ''].filter(Boolean).join('  ·  ') }),
       enJeu() && dansPartie(j.id) && !elim.has(j.id) ? h('div', { class: 'temps' },

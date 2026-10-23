@@ -65,7 +65,7 @@ Le joueur la publie à sa connexion. Il configure aussi un *Last Will* `{"id": "
 ```json
 {"id": "rpi1", "ville": "Annecy", "en_ligne": true, "nom": "Sherlock", "arch": "stratege",
  "couleurs": {"cheveux": "#17151c", "yeux": "#9aa0b8", "accent": "#c1121f"},
- "modele": "qwen3:0.6b", "strategie": "llm", "api": "http://10.109.150.60:5000"}
+ "modele": "qwen3:0.6b", "strategie": "llm", "llm": "ok", "api": "http://10.109.150.60:5000"}
 ```
 
 Seuls `id` et `en_ligne` sont obligatoires. Les autres champs servent à l'interface :
@@ -73,6 +73,7 @@ Seuls `id` et `en_ligne` sont obligatoires. Les autres champs servent à l'inter
 - `arch` : apparence du personnage (`stratege`, `vengeur`, `sourire`, `reine`, `ombre`, `prodige`). Par défaut, elle est choisie d'après l'id.
 - `couleurs` : couleurs du personnage (`#rrggbb`). Chacune est facultative.
 - `modele`, `strategie` : informatifs. `api` : URL de l'API HTTP de l'agent (TP Ollama, voir `joueur/README.md`).
+- `llm` : état de son LLM, `ok`, `injoignable`, `modele_absent`, `trop_lent` ou `erreur`. Le joueur republie sa présence quand il change ; l'interface affiche une alerte sur sa carte.
 
 ### `iot/partie/etat` : phase de la partie (maître → tous, retain)
 
@@ -140,7 +141,7 @@ Pendant le débat, un joueur ne publie ici que lorsqu'il a la parole. Chaque jou
 ```
 
 - `suspect` : l'id d'un autre joueur vivant. C'est le vote qui compte.
-- `calcul` : le suspect désigné par la méthode sans LLM (écart à la médiane + instabilité), même quand le joueur a voté avec son LLM.
+- `calcul` : le suspect désigné par la méthode sans LLM (celui dont l'écart aux autres varie le plus d'une mesure à l'autre), même quand le joueur a voté avec son LLM.
   Le maître peut ainsi répondre à la question de l'extension du TP : *l'agent est-il plus ou moins efficace que la méthode de départ ?*
 
 ### `iot/partie/verdict` : verdict de la manche (maître → tous)
@@ -174,4 +175,4 @@ Le maître garde ces chiffres d'une partie à l'autre dans `maitre_du_jeu/stats.
 
 - `votes.llm` : les votes des joueurs en stratégie `llm` (le choix du LLM).
 - `votes.calcul` : le champ `calcul` de **tous** les votes, c'est-à-dire ce qu'aurait voté la méthode sans LLM.
-- Un vote est **juste** s'il désigne l'espion.
+- Un vote est **juste** s'il désigne l'espion. Les votes de l'espion ne sont pas comptés (il ne vote jamais contre lui-même).
