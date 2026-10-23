@@ -17,7 +17,19 @@ PHRASES = [
     "Mes températures sont stables, regardez-les. Par contre {x} m'inquiète.",
     "{y} a raison de se méfier, mais je pense plutôt à {x}.",
     "Calmez-vous. {x} est peut-être juste dans une vallée plus froide.",
+    "Une vraie température ne saute pas d'un degré en cinq secondes. {x}, c'est quoi ton capteur ?",
+    "{y}, pourquoi tu ne dis rien sur {x} ? C'est suspect aussi, ça.",
+    "Je vote avec les chiffres, pas avec les impressions : {x} est le plus instable.",
+    "Je trouve {y} un peu trop pressé d'accuser {x}. Ça cache peut-être quelque chose.",
+    "{x}, tu es à côté de nous et tu as deux degrés d'écart. Ça ne colle pas.",
+    "Franchement, je n'ai pas encore d'avis. {x} et {y}, défendez-vous.",
+    "Si on se trompe encore, l'espion gagne. Regardons bien les valeurs de {x}.",
+]
+# Seulement à partir de la deuxième manche : l'IA se souvient de la précédente
+PHRASES_MEMOIRE = [
     "On a éliminé un innocent la dernière fois, ne refaisons pas la même erreur : {x} est le plus louche.",
+    "À la manche d'avant, {x} accusait déjà au hasard. Je ne lui fais pas confiance.",
+    "{y} avait vu juste la dernière fois. Je l'écoute, et je regarde {x}.",
 ]
 
 
@@ -44,7 +56,8 @@ def repondre(messages, format_json):
         return f"Bonne question ! Je suis un faux agent de test, mais je retiens ce que tu dis : « {texte[:60]} »."
     x = random.choice(instables) if instables and random.random() < 0.6 else random.choice(autres)
     y = random.choice([n for n in autres if n != x] or autres)
-    return random.choice(PHRASES).format(x=x, y=y)
+    souvenirs = PHRASES_MEMOIRE if "manches précédentes" in texte else []
+    return random.choice(PHRASES + souvenirs * 2).format(x=x, y=y)
 
 
 def main():

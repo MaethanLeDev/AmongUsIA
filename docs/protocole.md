@@ -50,7 +50,7 @@ FIN           maître  → iot/partie/resultat              (retain)
 
 - **Élimination** : à chaque manche, le joueur qui reçoit le plus de votes est éliminé. En cas d'égalité, ou si personne n'a voté, personne n'est éliminé.
   Option `--majorite` du maître : il faut en plus la majorité stricte des vivants (règle du TP).
-- **Les capteurs gagnent** dès que l'espion est éliminé.
+- **Les capteurs gagnent** dès que l'espion est éliminé. Dans les messages, le gagnant vaut `"capteurs"` (vocabulaire du sujet) ; l'interface et la console affichent « les innocents ».
 - **L'espion gagne** s'il ne reste que 2 vivants (lui et un capteur), ou si la dernière manche autorisée se termine sans qu'il soit éliminé.
   Par défaut, le nombre maximum de manches est `nombre de joueurs − 1`. Avec 3 joueurs, une seule élimination est donc possible.
 - **Mode TP** (`maitre.py --tp`) : une seule manche, sans débat, majorité stricte. C'est exactement le jeu de base du sujet.

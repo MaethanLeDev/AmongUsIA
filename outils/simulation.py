@@ -1,8 +1,7 @@
 """Lance une partie complète sur un seul PC, sans Raspberry Pi : broker de test, faux Ollama, N joueurs et le maître.
 
-Pour regarder la partie dans l'interface, dans un autre terminal :
-    cd interface && set MQTT_HOST=localhost && node server.js      (Windows)
-    cd interface && MQTT_HOST=localhost node server.js             (Linux, macOS)
+Pour regarder la partie dans l'interface, dans un autre terminal : node interface/server.js
+puis ouvrir http://localhost:5050. Mode d'emploi complet : docs/mode-emploi.md
 
 Usage :
     uv run outils/simulation.py                          5 joueurs, tout est simulé
@@ -82,7 +81,7 @@ def main():
             config = {
                 "id": f"sim{i + 1}", "ville": ville, "coordonnees": [lat, lon],
                 "broker": {"hote": args.broker or "localhost", "port": 1883},
-                "ollama": {"url": args.ollama or "http://127.0.0.1:11435", "modele": args.modele if args.ollama else "faux"},
+                "ollama": {"url": args.ollama or "http://127.0.0.1:11435", "modele": args.modele if args.ollama else "simulé"},
                 "personnalite": personnalite, "strategie": "llm" if i % 4 else "ecart",
                 "memoire": "resume" if args.resume else "faits",
                 "interface": {"nom": nom, "arch": arch}, "api": {"port": 5100 + i},

@@ -100,6 +100,7 @@ $('btnCam').onclick = () => { camAuto = !camAuto; store.set('cn_cam', camAuto ? 
 // ------------------------------------------------------------------ état de la partie
 let S = null, chat = [], decalage = 0, derniereManche = 0;   // decalage : horloge du navigateur moins celle du serveur
 const EN_JEU = ['mesures', 'debat', 'vote', 'verdict'];
+const VAINQUEURS = { capteurs: 'Les innocents gagnent', espion: 'L\'espion gagne' };   // "capteurs" dans le protocole (vocabulaire du sujet)
 const nom = id => (S && S.joueurs[id] && S.joueurs[id].nom) || id || '?';
 const couleur = id => { const j = S && S.joueurs[id]; return (j && (j.couleurs.accent || (ARCHETYPES[j.arch] || {}).accent)) || '#c1121f'; };
 const enJeu = () => EN_JEU.includes(S.partie.etat);
@@ -190,7 +191,7 @@ function textePhase() {
     case 'verdict': return [manche + 'Verdict', P.elimine ? `${nom(P.elimine)} quitte la table` : 'Égalité : personne n\'est éliminé'];
     case 'fini': {
       const r = resultatCourant();
-      return ['Fin de partie', r ? `${{ capteurs: 'Les capteurs gagnent', espion: 'L\'espion gagne' }[r.gagnant] || 'Partie annulée'} · l'espion était ${nom(r.espion)}` : ''];
+      return ['Fin de partie', r ? `${VAINQUEURS[r.gagnant] || 'Partie annulée'} · l'espion était ${nom(r.espion)}` : ''];
     }
     default: return ['En attente du maître du jeu', n ? `${n} IA à la table` : 'Aucune IA connectée pour l\'instant'];
   }
@@ -222,7 +223,8 @@ function majPanneaux() {
     box.append(h('div', { class: 'pcard' + (elim.has(j.id) || !j.en_ligne ? ' off' : '') + (S.parole && S.parole.joueur === j.id ? ' parle' : '') },
       h('div', { class: 'top' }, h('span', { class: 'dot', style: `background:${couleur(j.id)}` }), h('span', { class: 'nm', text: j.nom }),
         ...chips.map(([t, c]) => h('span', { class: 'chip ' + c, text: t }))),
-      h('div', { class: 'sub', text: [j.ville, j.modele, j.strategie === 'ecart' ? 'calcul' : ''].filter(Boolean).join(' · ') }),
+      h('div', { class: 'sub', title: 'Ville du capteur · modèle Ollama de l\'IA · façon de voter (LLM, ou calcul sans LLM)',
+        text: [j.ville && '📍 ' + j.ville, j.modele && '🧠 ' + j.modele, j.strategie === 'ecart' ? '🧮 vote par calcul' : j.strategie === 'llm' ? '💬 vote par LLM' : ''].filter(Boolean).join('  ·  ') }),
       enJeu() && dansPartie(j.id) && !elim.has(j.id) ? h('div', { class: 'temps' },
         Array.from({ length: P.echanges }, (_, i) => h('i', { class: temps[i] == null ? 'vide' : '', text: temps[i] == null ? '' : temps[i].toFixed(1) }))) : null,
       vote && ['vote', 'verdict'].includes(P.etat) ? h('div', { class: 'vote' }, '🗳 contre ', h('b', { text: nom(vote.suspect) }), vote.raison ? h('div', { class: 'tiny', text: vote.raison }) : null) : null));
@@ -240,7 +242,7 @@ function majPanneaux() {
   // bilan de l'extension du TP : LLM contre calcul
   const st = S.stats;
   $('bilan').textContent = st && st.parties + st.votes.llm.total + st.votes.calcul.total
-    ? `Votes justes · LLM : ${pourcent(st.votes.llm)} · calcul sans LLM : ${pourcent(st.votes.calcul)} · ${st.parties} partie${st.parties > 1 ? 's' : ''} (capteurs ${st.victoires.capteurs}, espion ${st.victoires.espion})`
+    ? `Votes justes · LLM : ${pourcent(st.votes.llm)} · calcul sans LLM : ${pourcent(st.votes.calcul)} · ${st.parties} partie${st.parties > 1 ? 's' : ''} (innocents ${st.victoires.capteurs}, espion ${st.victoires.espion})`
     : '';
 }
 
@@ -291,7 +293,7 @@ function annonceVerdict(v) {
   else annonce(`Manche ${v.manche}`, 'Égalité', 'Personne ne quitte la table.', '', 4000);
 }
 function annonceResultat(r) {
-  const titre = { capteurs: 'Les capteurs gagnent', espion: 'L\'espion gagne' }[r.gagnant] || 'Partie annulée';
+  const titre = VAINQUEURS[r.gagnant] || 'Partie annulée';
   const st = S.stats, stats = st ? `Depuis le début, votes justes · LLM : ${pourcent(st.votes.llm)} · calcul sans LLM : ${pourcent(st.votes.calcul)}` : '';
   annonce('Fin de partie', titre, `L'espion était ${nom(r.espion)}${r.raison ? ' · ' + r.raison : ''}`, stats, 0, r.gagnant === 'capteurs' ? 'pos' : 'neg');
 }

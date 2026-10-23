@@ -2,7 +2,7 @@
 
 ```bash
 uv sync                               # une fois, à la racine du dépôt
-uv run maitre_du_jeu/maitre.py        # broker amongus.local, puis 10.109.150.215
+uv run maitre_du_jeu/maitre.py        # broker localhost, puis amongus.local, puis 10.109.150.215
 uv run maitre_du_jeu/maitre.py --tp   # le jeu de base du sujet : une manche, sans débat, majorité stricte
 ```
 
@@ -13,7 +13,7 @@ Il tourne sur n'importe quelle machine qui joint le broker (le Pi du broker conv
 
 | Option             | Défaut                           | Rôle                                                                     |
 |--------------------|----------------------------------|--------------------------------------------------------------------------|
-| `--broker`         | `amongus.local,10.109.150.215`   | broker(s), essayés dans l'ordre                                          |
+| `--broker`         | `localhost,amongus.local,10.109.150.215` | broker(s), essayés dans l'ordre                                  |
 | `--port`           | `1883`                           |                                                                          |
 | `--min-joueurs`    | `3`                              |                                                                          |
 | `--max-joueurs`    | `12`                             | le nombre de sièges de l'interface ; les suivants attendent              |
@@ -37,7 +37,7 @@ Il tourne sur n'importe quelle machine qui joint le broker (le Pi du broker conv
 4. Il ignore les votes invalides : en double, contre soi-même, contre un éliminé, ou d'une manche précédente. Il publie le verdict (`iot/partie/verdict`) : le plus désigné est éliminé, personne en cas d'égalité.
 5. En fin de partie, il publie le résultat (`iot/partie/resultat`) et les statistiques (`iot/partie/stats`).
 
-Une partie s'arrête aussi si l'espion se déconnecte (les capteurs gagnent par abandon), ou s'il reste moins de deux joueurs en ligne (partie annulée).
+Une partie s'arrête aussi si l'espion se déconnecte (les innocents gagnent par abandon), ou s'il reste moins de deux joueurs en ligne (partie annulée).
 
 ## Statistiques : le LLM contre le calcul
 

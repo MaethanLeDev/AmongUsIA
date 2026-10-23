@@ -26,6 +26,8 @@ Les spectateurs regardent la partie dans une **salle 3D**, depuis n'importe quel
 | `outils/`        | broker, faux Ollama et simulation pour tester une partie sur un seul PC                          |
 | `docs/`          | **[le protocole MQTT](docs/protocole.md)** : le contrat entre tous les modules                    |
 
+> **[Mode d'emploi](docs/mode-emploi.md)** : lancer une partie avec ou sans Raspberry Pi, personnaliser son IA, toutes les options.
+>
 > Tous les modules ne communiquent **que** par MQTT, avec les topics définis dans [docs/protocole.md](docs/protocole.md).
 > Pour changer un topic ou un champ, modifiez d'abord ce fichier et prévenez les autres.
 
@@ -38,7 +40,7 @@ Les spectateurs regardent la partie dans une **salle 3D**, depuis n'importe quel
    - **débat** : chaque IA parle à son tour, et la caméra la suit ;
    - **vote** : les arcs rouges montrent qui accuse qui ;
    - **verdict** : l'IA la plus désignée est aspirée par la lampe.
-4. Si c'était l'espion, les capteurs gagnent. Sinon, la manche suivante commence, et les IA **se souviennent** des manches précédentes. Quand il ne reste que deux joueurs, l'espion gagne.
+4. Si c'était l'espion, les innocents gagnent. Sinon, la manche suivante commence, et les IA **se souviennent** des manches précédentes. Quand il ne reste que deux joueurs, l'espion gagne.
 
 Les règles complètes sont dans [docs/protocole.md](docs/protocole.md#règles).
 
@@ -70,7 +72,7 @@ Une seule fois sur chaque machine Python : installer [uv](https://docs.astral.sh
    ```
 3. **Maître du jeu** (n'importe quelle machine, par exemple le Pi du broker) : `uv run maitre_du_jeu/maitre.py`.
    La partie démarre toute seule 30 s après la dernière arrivée, dès qu'il y a 3 IA (ou plus tôt avec Entrée).
-4. **Interface** (une machine avec Node.js ≥ 18) : `cd interface && node server.js`.
+4. **Interface** (une machine avec Node.js ≥ 18) : `node interface/server.js`.
    Les spectateurs ouvrent l'adresse affichée, par exemple `http://10.109.150.140:5050`.
 
 Le nombre d'IA n'est pas fixé : de 3 à 12, autant qu'il y a de sièges. Une IA qui arrive en cours de partie attend la suivante.
@@ -80,10 +82,8 @@ Le nombre d'IA n'est pas fixé : de 3 à 12, autant qu'il y a de sièges. Une IA
 Tout tient sur un seul PC, sans Docker ni Ollama :
 
 ```bash
-uv run outils/simulation.py --joueurs 6 --rapide
-# dans un autre terminal (Windows) :
-cd interface && set MQTT_HOST=localhost && node server.js
-# (Linux/macOS : cd interface && MQTT_HOST=localhost node server.js)
+uv run outils/simulation.py --joueurs 6 --rapide     # terminal 1
+node interface/server.js                             # terminal 2
 ```
 
 puis ouvrir http://localhost:5050. `outils/simulation.py` lance un broker de test (`outils/broker_dev.py`), un faux Ollama (`outils/faux_ollama.py`), N joueurs et le maître.
@@ -97,5 +97,5 @@ Avec un vrai Ollama installé sur le PC : `--ollama http://127.0.0.1:11434 --mod
 | « Aucun broker joignable »                             | Le réseau bloque peut-être le mDNS (`amongus.local`) : mettre l'IP `10.109.150.215` dans la config ou `--broker`. |
 | « Météo indisponible »                                 | Pas d'accès Internet depuis le Pi (proxy de l'IUT ?) : `export HTTPS_PROXY=...`, ou `"coordonnees": [lat, lon]` si le géocodage échoue. |
 | Une IA reste muette (« Je préfère écouter… »)          | Ollama ne répond pas : `curl http://127.0.0.1:11434/api/tags`, puis `GET http://<pi>:5000/health`. |
-| L'interface reste sur « En attente du maître du jeu »  | Le maître n'est pas lancé, ou l'interface n'écoute pas le bon broker (`set MQTT_HOST=<ip>`).    |
+| L'interface reste sur « En attente du maître du jeu »  | Le maître n'est pas lancé, ou l'interface n'écoute pas le bon broker (`node interface/server.js --broker <ip>`). |
 | Voir tout le trafic MQTT                               | `mosquitto_sub -h amongus.local -t 'iot/#' -v`, ou l'état reconstruit par l'interface : `http://<ip>:5050/api/etat`. |
