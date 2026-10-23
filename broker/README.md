@@ -42,4 +42,9 @@ mosquitto_sub -h amongus.local -t 'iot/#' -v      # voir tout le trafic du jeu
 mosquitto_pub -h amongus.local -t 'iot/test' -m 'hello'
 ```
 
+## Sans Docker, pour tester sur un PC
+
+`python outils/broker_dev.py` lance un petit broker de test (MQTT 3.1.1, messages retenus, Last Will) sur le port 1883.
+`outils/simulation.py` s'en sert pour jouer une partie complète sans Raspberry Pi. Pour les vraies parties, gardez Mosquitto.
+
 Protocole : [../docs/protocole.md](../docs/protocole.md)
