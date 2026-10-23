@@ -3,7 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Classe Noire</title>
+<title>Classe Noire · L'espion</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 40'%3E%3Cpath d='M2 20C12 6 24 2 32 2s20 4 30 18C52 34 40 38 32 38S12 34 2 20Z' fill='%23050507' stroke='%23d6182c' stroke-width='3'/%3E%3Ccircle cx='32' cy='20' r='9' fill='%23d6182c'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="style.css">
 <script type="importmap">
 { "imports": { "three": "/vendor/three/three.module.min.js", "three/addons/": "/vendor/three/jsm/" } }
@@ -12,70 +13,40 @@
 <body>
 <canvas id="gl"></canvas>
 
-<!-- ============ création de personnage / connexion ============ -->
-<div id="login" class="overlay side">
-  <div class="card creator">
-    <div class="eyebrow">BIENVENUE DANS LA</div>
-    <h1>CLASSE <b>NOIRE</b></h1>
-    <p class="sub">Alliances, trahisons, disparitions. Qui est le véritable Ayanokoji de la bande ?</p>
-    <input id="name" maxlength="16" placeholder="Ton nom de code" autocomplete="off">
-    <div class="label">Choisis ton personnage</div>
-    <div id="archGrid"></div>
-    <div class="label">Personnalise</div>
-    <div class="sw"><span>Cheveux</span><div id="swHair"></div></div>
-    <div class="sw"><span>Yeux</span><div id="swEyes"></div></div>
-    <div class="sw"><span>Accent</span><div id="swAccent"></div></div>
-    <button id="join" class="primary">ENTRER DANS LA CLASSE</button>
-    <button id="cancelEdit" class="ghost hidden">Annuler</button>
-    <div id="loginMsg"></div>
-  </div>
-</div>
-
-<!-- ============ hub ============ -->
-<div id="hubUI" class="hidden">
-  <div class="hubtop">
+<div id="ui">
+  <header class="entete">
     <div class="logo"><svg viewBox="0 0 64 40" width="30" height="19" aria-hidden="true"><path d="M2 20C12 6 24 2 32 2s20 4 30 18C52 34 40 38 32 38S12 34 2 20Z" fill="none" stroke="currentColor" stroke-width="2.5"/><circle cx="32" cy="20" r="9" fill="currentColor"/><circle cx="32" cy="20" r="3.5" fill="#050507"/></svg><span>CLASSE <b>NOIRE</b></span></div>
-    <div id="hubStatus"></div>
-    <div class="hbtns"><span id="ping"></span><button id="btnChar" title="Mon personnage">🎭</button><button id="btnRules" title="Règles">?</button><button id="btnSound" title="Son">🔊</button></div>
-  </div>
-  <div class="hubleft panel"><div class="label first">Dans la classe</div><div id="hubUsers"></div></div>
-  <div class="hubright panel">
-    <div id="hubLog"></div>
-    <form id="hubForm" autocomplete="off"><input id="hubMsg" maxlength="200" placeholder="Parler au salon…"><button type="submit">➤</button></form>
-    <div class="label">Palmarès des plus sombres</div><div id="board"><span class="dim">Aucune partie pour l'instant.</span></div>
-  </div>
-  <div id="hubModes"></div>
-</div>
-
-<!-- ============ jeu de table (cartes) ============ -->
-<div id="tableUI" class="hidden">
-  <header>
-    <div class="logo"><button id="tBack" class="ghost small">← Salon</button><span>LA TABLE</span></div>
-    <div id="phase"></div>
-    <div class="hbtns"><span id="tping"></span><button id="tRules" title="Règles">?</button></div>
+    <div id="phase"><div id="phaseTitre">Connexion…</div><div id="phaseSous"></div></div>
+    <div class="hbtns"><span id="reseau"></span><button id="btnCam" title="Caméra automatique">🎥</button><button id="btnSon" title="Son">🔊</button><button id="btnRegles" title="Règles">?</button></div>
     <div id="timer"><div id="timerFill"></div></div>
   </header>
-  <main>
-    <aside id="players"></aside>
-    <section id="stage"></section>
-    <aside id="chatbox">
-      <div id="log"></div>
-      <form id="composer" autocomplete="off"><select id="to"></select><input id="msg" maxlength="200" placeholder="Dire quelque chose…"><button type="submit">➤</button></form>
-      <button id="rumorBtn" type="button" class="ghost">📢 Rumeur anonyme (−1 PC)</button>
-    </aside>
-  </main>
+
+  <aside id="joueurs" class="panel"><div class="label first">Les IA à la table</div><div id="cartes"></div></aside>
+
+  <aside id="debat" class="panel">
+    <div class="label first">Ce qui se dit à la table</div>
+    <div id="log"></div>
+    <div id="bilan" class="tiny"></div>
+  </aside>
+
+  <div id="decompte" class="panel hidden"></div>
+  <div id="annonce" class="hidden"><div class="eyebrow" id="annonceSur"></div><h2 id="annonceTitre"></h2><p id="annonceTexte"></p><div id="annonceStats" class="tiny"></div></div>
 </div>
 
-<div id="rules" class="overlay hidden">
+<div id="regles" class="overlay hidden">
   <div class="card wide">
-    <h2>Règles de la classe</h2>
+    <h2>Qui est l'espion ?</h2>
     <div class="rules">
-      <h3>Le salon</h3>
-      <p>Tout le monde s'assoit autour de la table. L'hôte (👑, sur l'ordinateur du serveur) lance <b>La Table</b> (jeu de cartes de manipulation). Les agents IA des Raspberry Pi (📡) rejoignent le salon dès qu'ils se connectent au broker.</p>
-      <h3>La Table</h3>
-      <p>Négociation → choix secret (coopérer / trahir / observer) → accusation → révélation. Voir le jeu pour le détail des points.</p>
+      <p>Chaque IA tourne sur un <b>Raspberry Pi</b> avec son propre modèle Ollama et sa propre personnalité. Toutes sont des <b>capteurs météo</b> : elles publient la température de leur ville par MQTT, 5 fois par manche.</p>
+      <p>Le maître du jeu a désigné en secret un <b>espion</b> : ses températures sont fausses (±10 % autour de celles des autres).</p>
+      <h3>Une manche</h3>
+      <p><b>Mesures</b> : les capteurs publient leurs températures. <b>Débat</b> : chaque IA prend la parole à son tour. <b>Vote</b> : chacune désigne un suspect. <b>Verdict</b> : la plus désignée quitte la table.</p>
+      <h3>Fin de partie</h3>
+      <p>Si l'espion est éliminé, les capteurs gagnent. Sinon la partie continue, et les IA se souviennent des manches précédentes. Quand il ne reste que deux joueurs, l'espion a gagné.</p>
+      <h3>Pour le TP</h3>
+      <p>Chaque vote indique aussi ce qu'aurait choisi la méthode de calcul sans LLM : le bilan en bas à droite compare les deux.</p>
     </div>
-    <button id="closeRules" class="primary">Compris</button>
+    <button id="fermerRegles" class="primary">Compris</button>
   </div>
 </div>
 

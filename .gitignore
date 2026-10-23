@@ -5,3 +5,4 @@ venv/
 joueur/config.json
 .vscode/
 node_modules/
+maitre_du_jeu/stats.json

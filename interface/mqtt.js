@@ -1,32 +1,37 @@
 'use strict';
 // Client MQTT 3.1.1 minimal, sans dépendance (Node.js seul). QoS 0 uniquement : suffisant pour le TP.
-// Usage : const c = createMqtt({ host, port, clientId, onMessage(topic, obj, raw), onState(connecté) }); c.subscribe('iot/#'); c.publish(topic, obj);
+// Usage : const c = createMqtt({ hosts: ['amongus.local', '10.109.150.215'], port, clientId, onMessage(topic, obj, raw, retenu), onState(connecté, hôte) });
+//         c.subscribe('iot/#'); c.publish(topic, obj);
+// Plusieurs hôtes : ils sont essayés à tour de rôle jusqu'à ce que l'un réponde (nom mDNS, puis IP de secours).
 const net = require('net');
 
 const str = s => { const b = Buffer.from(s, 'utf8'); return Buffer.concat([Buffer.from([b.length >> 8, b.length & 255]), b]); };
 function remLen(n) { const out = []; do { let d = n % 128; n = Math.floor(n / 128); if (n > 0) d |= 128; out.push(d); } while (n > 0); return Buffer.from(out); }
 const packet = (first, body) => Buffer.concat([Buffer.from([first]), remLen(body.length), body]);
 
-module.exports = function createMqtt({ host, port = 1883, clientId = 'classe-noire', keepAlive = 30, onMessage, onState, log = () => {} }) {
-  let sock = null, buf = Buffer.alloc(0), ok = false, pid = 1, timer = null, ping = null, stopped = false;
+module.exports = function createMqtt({ hosts, port = 1883, clientId = 'classe-noire', keepAlive = 30, onMessage, onState, log = () => {} }) {
+  let sock = null, buf = Buffer.alloc(0), ok = false, pid = 1, timer = null, ping = null, stopped = false, errs = 0, h = 0;
   const subs = new Set();
+  const host = () => hosts[h % hosts.length];
 
   function send(p) { if (sock && !sock.destroyed) sock.write(p); }
   function subscribePacket(topic) { return packet(0x82, Buffer.concat([Buffer.from([pid >> 8, pid & 255]), str(topic), Buffer.from([0])])); }
 
   function connect() {
     if (stopped) return;
-    sock = net.connect({ host, port });
+    sock = net.connect({ host: host(), port });
     sock.setNoDelay(true);
+    sock.setTimeout(5000, () => sock.destroy(new Error('pas de réponse')));   // une IP injoignable ne bloque pas 20 s
     sock.on('connect', () => {
       // CONNECT : protocole MQTT 4, clean session, keep-alive
       send(packet(0x10, Buffer.concat([str('MQTT'), Buffer.from([4, 2, keepAlive >> 8, keepAlive & 255]), str(clientId)])));
     });
     sock.on('data', d => { buf = Buffer.concat([buf, d]); parse(); });
-    sock.on('error', e => log(`MQTT : ${e.code || e.message}`));
+    sock.on('error', e => { if (errs++ % (10 * hosts.length) < hosts.length) log(`MQTT ${host()}:${port} : ${e.code || e.message} (nouvel essai dans 3 s)`); });   // pas de spam si le broker est injoignable
     sock.on('close', () => {
       const was = ok; ok = false; clearInterval(ping); buf = Buffer.alloc(0);
-      if (was && onState) onState(false);
+      if (was && onState) onState(false, host());
+      if (!was) h++;                                         // cet hôte ne répond pas : on essaie le suivant
       if (!stopped) timer = setTimeout(connect, 3000);      // reconnexion automatique
     });
   }
@@ -41,7 +46,7 @@ module.exports = function createMqtt({ host, port = 1883, clientId = 'classe-noi
       buf = buf.subarray(i + len);
       if (type === 2) {                                           // CONNACK
         if (body[1] !== 0) { log(`MQTT : connexion refusée (code ${body[1]})`); sock.destroy(); return; }
-        ok = true; if (onState) onState(true);
+        ok = true; errs = 0; sock.setTimeout(0); if (onState) onState(true, host());
         for (const t of subs) { send(subscribePacket(t)); pid = (pid % 65534) + 1; }
         clearInterval(ping); ping = setInterval(() => send(Buffer.from([0xc0, 0])), keepAlive * 500);
       } else if (type === 3) {                                    // PUBLISH
@@ -50,7 +55,7 @@ module.exports = function createMqtt({ host, port = 1883, clientId = 'classe-noi
         if (qos > 0) { const id = body.readUInt16BE(off); off += 2; send(Buffer.from([0x40, 2, id >> 8, id & 255])); }
         const raw = body.toString('utf8', off); let obj = null;
         try { obj = JSON.parse(raw); } catch { /* message non JSON : on garde le texte brut */ }
-        try { onMessage(topic, obj, raw); } catch (e) { console.error('Erreur MQTT :', e); }
+        try { onMessage(topic, obj, raw, !!(flags & 1)); } catch (e) { console.error('Erreur MQTT :', e); }
       }
     }
   }
@@ -58,6 +63,7 @@ module.exports = function createMqtt({ host, port = 1883, clientId = 'classe-noi
   connect();
   return {
     get connected() { return ok; },
+    get host() { return host(); },
     subscribe(topic) { subs.add(topic); if (ok) { send(subscribePacket(topic)); pid = (pid % 65534) + 1; } },
     publish(topic, obj, retain = false) {
       if (!ok) return false;
