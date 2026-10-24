@@ -1,7 +1,9 @@
-"""Outils des tests : faux client MQTT, temps figé, condition instantanée (importés par les tests et conftest.py)."""
+"""Outils des tests : faux client MQTT, fausse réponse HTTP, temps figé, condition instantanée (importés par les tests)."""
 import json
 import threading
 from collections import namedtuple
+
+import requests
 
 ID_PARTIE = 1761200000   # horodatage de la partie type, et heure du temps figé
 Publication = namedtuple("Publication", "topic contenu retain")
@@ -111,6 +113,21 @@ class FauxClientMQTT:
     def retenu(self, topic):
         """La dernière publication exacte sur ce topic (pour vérifier son drapeau retain)."""
         return next((p for p in reversed(self.publications) if p.topic == topic), None)
+
+
+class FausseReponseHTTP:
+    """Ce que renvoie requests.get/post simulé : contenu JSON et code HTTP."""
+
+    def __init__(self, contenu, code=200):
+        self.contenu, self.status_code = contenu, code
+        self.ok = code < 400
+
+    def json(self):
+        return self.contenu
+
+    def raise_for_status(self):
+        if not self.ok:
+            raise requests.HTTPError(f"{self.status_code}")
 
 
 class FauxTemps:
