@@ -6,7 +6,7 @@ readme = "README.md"
 authors = [
     { name = "MaethanLeDev", email = "maethan.tordeux@etu.univ-smb.fr" }
 ]
-requires-python = ">=3.11"  # Raspberry Pi OS Bookworm : Python 3.11
+requires-python = ">=3.14"  # installé par uv sur chaque machine (.python-version), sans toucher au Python du système
 dependencies = [
     "paho-mqtt>=2.1.0",
     "requests>=2.34.2",
@@ -19,7 +19,7 @@ package = false
 # Lint : uvx ruff check (aucune dépendance à installer). Pas de ruff format imposé : il reformaterait tout le code du groupe.
 [tool.ruff]
 line-length = 140
-target-version = "py311"
+target-version = "py314"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "B", "UP", "SIM", "I"]
@@ -27,3 +27,15 @@ ignore = ["SIM105"]   # try/except/pass est accepté, plus lisible pour le group
 
 [tool.ruff.lint.isort]
 known-first-party = ["api", "ia", "meteo"]   # modules de joueur/, importés directement
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-cov>=7.1.0",
+]
+
+# Tests : uv run pytest -q (voir la section « Tests » du README)
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--import-mode=importlib"   # tests/joueur/ ne masque pas le module joueur.py
+xfail_strict = true                   # un bug corrigé fait échouer son xfail : on pense à retirer la marque

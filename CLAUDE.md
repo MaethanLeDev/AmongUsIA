@@ -46,7 +46,7 @@ Détaillées dans `.claude/rules/` : `qualite.md` (toujours chargé), `python.md
 ## Conventions de code
 
 - **Tout est en français** : noms de variables, fonctions, classes (`Joueur.voter`, `MaitreDuJeu.phase_verdict`), commentaires, docstrings, messages de log, README. Garder ce style, sans accents dans les identifiants.
-- Python ≥ 3.11 (Raspberry Pi OS Bookworm). Dépendances limitées à `paho-mqtt` (API v2 : callbacks avec `reason_code, properties`) et `requests`. N'en ajouter une qu'avec `uv add`, et seulement si c'est indispensable : elle doit s'installer sur un Pi.
+- Python 3.14 (fixé par `.python-version`, installé par uv sur chaque machine, y compris les Pi, sans toucher au Python du système). Dépendances limitées à `paho-mqtt` (API v2 : callbacks avec `reason_code, properties`) et `requests`. N'en ajouter une qu'avec `uv add`, et seulement si c'est indispensable : elle doit s'installer sur un Pi.
 - Les scripts sont lancés avec `uv run <dossier>/<script>.py` (pas un paquet : `package = false`) ; les imports entre fichiers d'un même dossier sont directs (`from ia import IA`).
 - Interface : **zéro dépendance npm**, Node seul (client MQTT 3.1.1 et WebSocket écrits à la main). `public/` est en modules ES servis tels quels, sans build. Ne jamais modifier `interface/public/vendor/` (Three.js fourni).
 - Messages MQTT : JSON UTF-8, `ensure_ascii=False`. Les `id` ne contiennent ni espace, ni `/`, `+`, `#`.

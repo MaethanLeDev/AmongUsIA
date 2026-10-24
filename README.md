@@ -60,6 +60,7 @@ Les règles complètes sont dans [docs/protocole.md](docs/protocole.md#règles).
 ## Lancer une vraie partie
 
 Une seule fois sur chaque machine Python : installer [uv](https://docs.astral.sh/uv/), puis `uv sync` à la racine du dépôt.
+uv télécharge lui-même Python 3.14 (version fixée par `.python-version`), sans toucher au Python du système : il faut juste un accès Internet la première fois.
 
 1. **Broker** (Pi de Niels) : `cd broker && docker compose up -d`.
 2. **Chaque Raspberry Pi** :
