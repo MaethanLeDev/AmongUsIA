@@ -15,3 +15,15 @@ dependencies = [
 # Ce sont des scripts (uv run joueur/joueur.py), pas un paquet à installer
 [tool.uv]
 package = false
+
+# Lint : uvx ruff check (aucune dépendance à installer). Pas de ruff format imposé : il reformaterait tout le code du groupe.
+[tool.ruff]
+line-length = 140
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "B", "UP", "SIM", "I"]
+ignore = ["SIM105"]   # try/except/pass est accepté, plus lisible pour le groupe que contextlib.suppress
+
+[tool.ruff.lint.isort]
+known-first-party = ["api", "ia", "meteo"]   # modules de joueur/, importés directement

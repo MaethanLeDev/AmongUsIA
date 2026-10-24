@@ -1,0 +1,89 @@
+# Intégration continue : à chaque push et chaque PR, on vérifie ce qu'on vérifierait à la main avant un commit
+# (voir CLAUDE.md, skill /verifier). Pas de déploiement : les Pi sont sur le réseau de l'IUT, injoignables depuis GitHub.
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+# Un nouveau push sur la même branche annule la vérification précédente, devenue inutile
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    name: Python (lint + syntaxe)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa # v10.3.1
+        with:
+          python-version: "3.11"   # celle de Raspberry Pi OS Bookworm
+      - name: Lint (règles ruff de pyproject.toml)
+        run: uvx ruff check --output-format=github .
+      - name: Syntaxe
+        run: uv run python -m py_compile joueur/*.py maitre_du_jeu/*.py outils/*.py
+
+  interface:
+    name: Interface (syntaxe Node)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+      # public/vendor/ est Three.js fourni tel quel : on ne vérifie que notre code
+      - name: Syntaxe
+        run: |
+          for f in interface/*.js $(find interface/public -name '*.js' -not -path '*/vendor/*'); do
+            node --check "$f"
+          done
+
+  broker:
+    name: Broker (docker compose)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Fichier compose valide
+        run: docker compose -f broker/docker-compose.yml config --quiet
+
+  simulation:
+    name: Partie simulée (mode --tp)
+    needs: python
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa # v10.3.1
+        with:
+          python-version: "3.11"
+      - run: uv sync
+      # Le maître enchaîne les parties sans fin : on attend le premier résultat, puis Ctrl+C (SIGINT) pour que la
+      # simulation arrête proprement broker, faux Ollama et joueurs. Sans set -m, bash ferait ignorer SIGINT à la
+      # tâche de fond ; avec, elle a son propre groupe de processus, auquel on envoie le signal.
+      - name: Une partie complète
+        run: |
+          set -m
+          uv run outils/simulation.py --joueurs 3 --rapide -- --tp > simulation.log 2>&1 &
+          for i in $(seq 240); do
+            grep -q "=== RÉSULTAT ===" simulation.log && break
+            sleep 1
+          done
+          sleep 2
+          kill -INT -- -$! || true
+          wait || true
+          cat simulation.log
+          grep -q "Victoire" simulation.log
+      - name: Journaux des joueurs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: journaux-simulation
+          path: |
+            simulation.log
+            /tmp/amongusia-*/
