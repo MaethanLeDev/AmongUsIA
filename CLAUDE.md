@@ -33,9 +33,16 @@ uv run joueur/joueur.py [config.json]
 cd interface && node server.js                        # MQTT_HOST=localhost pour la simulation ; http://localhost:5050, /api/etat
 uv run python -m py_compile joueur/*.py maitre_du_jeu/*.py outils/*.py   # vérif syntaxe
 node --check interface/server.js                      # idem côté Node
+uv run pytest -q                                      # tests unitaires Python (quelques secondes)
+node --test "interface/tests/*.test.js"               # tests de l'interface
 ```
 
-Il n'y a pas de tests automatisés : la vérification, c'est la compilation + une simulation rapide dont on lit les journaux (skill `/verifier`).
+## Tests
+
+- Python : `tests/<module>/test_*.py` (pytest) ; interface : `interface/tests/*.test.js` (`node:test`, zéro dépendance npm). Conventions et commandes : section « Tests » du README.
+- Jamais de vrai broker, Ollama ou Internet : `faux_mqtt` (paho remplacé par `FauxClientMQTT`, `injecter(topic, contenu)`), `figer_temps`, `requests` simulé avec `monkeypatch`, faux broker TCP côté interface. Réutiliser `tests/aides.py` et les fixtures des `conftest.py` avant d'en écrire de nouvelles.
+- Un comportement par test, nom en français. Un test qui révèle un bug : `xfail(reason="bug : …")`, pas de correction du code de production sans accord. Quand un bug marqué xfail est corrigé, retirer la marque (`xfail_strict`).
+- Tout comportement modifié ou ajouté dans un module vient avec son test. Les tests ne remplacent pas la simulation rapide pour un changement de déroulement de partie (skill `/verifier`).
 
 ## Bonnes pratiques
 

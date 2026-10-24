@@ -1,11 +1,19 @@
-"""Fixtures du joueur : un Joueur branché sur le faux client MQTT, le temps figé, et ses actions enregistrées."""
+"""Fixtures du joueur : un Joueur branché sur le faux client MQTT, avec Ollama et Open-Meteo simulés au niveau HTTP.
+
+Les tests regardent ce qui sort du joueur (publications MQTT, requêtes à Ollama), pas comment il range ses données :
+une réorganisation de joueur.py ne doit pas casser les tests tant que le comportement ne change pas.
+"""
+from types import SimpleNamespace
+
 import joueur
 import pytest
-from aides import ID_PARTIE
+import requests
+from aides import ID_PARTIE, FausseReponseHTTP
 
 from ia import Partie
 
 JOUEURS = ["rpi1", "rpi2", "rpi3", "rpi4"]
+VOTE_LLM = '{"suspect": "rpi3", "raison": "Ses valeurs sautent."}'
 
 
 @pytest.fixture
@@ -14,23 +22,47 @@ def temps(figer_temps):
 
 
 @pytest.fixture
-def joueur_jeu(faux_mqtt, config_joueur, temps):
-    """Le joueur rpi1. Les actions lancées en arrière-plan ne s'exécutent pas : elles sont notées dans j.lances."""
-    j = joueur.Joueur(config_joueur)
-    j.lances = []
+def llm(monkeypatch):
+    """Faux Ollama (requests.post) : .vote pour les réponses JSON, .parole sinon, .pendant(corps) appelé pendant
+    la « réflexion ». .requetes garde chaque requête, .prompts() le dernier message de chacune."""
+    faux = SimpleNamespace(vote=VOTE_LLM, parole="Kaito, explique-toi.", pendant=None, requetes=[])
+    faux.prompts = lambda: [r["json"]["messages"][-1]["content"] for r in faux.requetes]
 
-    def noter(fonction, *args):
-        j.lances.append((fonction.__name__, *args))
-    j.en_arriere_plan = noter
-    return j
+    def post(url, json=None, timeout=None):
+        faux.requetes.append({"url": url, "json": json, "timeout": timeout})
+        if faux.pendant:
+            faux.pendant(json)
+        contenu = faux.vote if json.get("format") == "json" else faux.parole
+        return FausseReponseHTTP({"message": {"role": "assistant", "content": contenu}})
+
+    monkeypatch.setattr(requests, "post", post)
+    return faux
 
 
 @pytest.fixture
-def lances(joueur_jeu):
-    """Les noms des actions lancées, dans l'ordre : ["mesurer", "voter", ...]."""
-    def noms():
-        return [action[0] for action in joueur_jeu.lances]
-    return noms
+def meteo_service(monkeypatch):
+    """Faux Open-Meteo (requests.get) : .valeur est un nombre, None (réponse sans température) ou une fonction."""
+    service = SimpleNamespace(valeur=12.34)
+
+    def get(url, params=None, timeout=None):
+        if "open-meteo" not in url:
+            return FausseReponseHTTP({"models": []})   # /api/tags d'Ollama (GET /health)
+        valeur = service.valeur() if callable(service.valeur) else service.valeur
+        return FausseReponseHTTP({"current": {} if valeur is None else {"temperature_2m": valeur}})
+
+    monkeypatch.setattr(requests, "get", get)
+    return service
+
+
+@pytest.fixture
+def joueur_jeu(faux_mqtt, config_joueur, temps, llm, meteo_service):
+    """Le joueur rpi1. Ses actions (mesurer, parler, voter…) s'exécutent tout de suite, sans thread."""
+    j = joueur.Joueur(config_joueur)
+
+    def executer(fonction, *args):
+        fonction(*args)
+    j.en_arriere_plan = executer
+    return j
 
 
 @pytest.fixture
@@ -43,10 +75,10 @@ def donner_role(joueur_jeu):
 
 @pytest.fixture
 def annoncer_phase(joueur_jeu):
-    """annoncer_phase("vote", manche=2) : le maître publie iot/partie/etat (retenu)."""
+    """annoncer_phase("vote", manche=2) : le maître publie iot/partie/etat (retenu). La phase finit à ID_PARTIE + 60."""
     def annoncer(etat, manche=1, partie=ID_PARTIE, vivants=JOUEURS, **champs):
         contenu = {"etat": etat, "partie": partie, "manche": manche, "manches_max": 3, "joueurs": JOUEURS,
-                   "vivants": list(vivants), "elimines": [], "fin": ID_PARTIE + 60, **champs}
+                   "vivants": list(vivants), "elimines": [], "fin": ID_PARTIE + 60, "echanges": 5, **champs}
         joueur_jeu.client.injecter("iot/partie/etat", contenu, retain=True)
         return contenu
     return annoncer
@@ -58,7 +90,6 @@ def en_partie(joueur_jeu, donner_role, annoncer_phase):
     def preparer(role="normal"):
         donner_role(role)
         annoncer_phase("debat")
-        joueur_jeu.lances.clear()
         return joueur_jeu
     return preparer
 

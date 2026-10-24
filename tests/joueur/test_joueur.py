@@ -1,4 +1,8 @@
-"""Le joueur (joueur.py) : filtres partie/manche, une action par phase, mesures de l'espion, vote, config.json."""
+"""Le joueur (joueur.py), vu de l'extérieur : ce qu'il publie sur MQTT et ce qu'il demande à Ollama.
+
+Les tests ne lisent pas ses attributs internes. Ce qu'il a retenu des autres se voit dans le champ « calcul »
+de son vote (la méthode sans LLM) ou dans le contexte qu'il envoie au LLM.
+"""
 import json
 import random
 
@@ -6,9 +10,21 @@ import joueur
 import pytest
 from aides import ID_PARTIE, FauxClientMQTT, FauxMessage
 
-from ia import Partie
-
 AUTRE_PARTIE = ID_PARTIE - 500
+STABLES = {"rpi2": [12.0] * 5, "rpi4": [12.1] * 5}
+INSTABLE = [13.4, 11.0, 13.9, 10.8, 13.6]
+
+
+def temperatures(j):
+    return j.client.publies("iot/capteurs/rpi1/temperature")
+
+
+def votes(j):
+    return j.client.publies("iot/votes/rpi1")
+
+
+def repliques(j):
+    return j.client.publies("iot/chat/rpi1")
 
 
 def mesure(id_joueur, temperature, echange=1, manche=1, partie=ID_PARTIE):
@@ -16,543 +32,553 @@ def mesure(id_joueur, temperature, echange=1, manche=1, partie=ID_PARTIE):
                                                      "manche": manche, "partie": partie}
 
 
+def publier_mesures(j, series, manche=1, partie=ID_PARTIE):
+    """series = {"rpi2": [12.0, ...]} : ces joueurs publient leurs températures, un échange après l'autre."""
+    for id_joueur, valeurs in series.items():
+        for echange, valeur in enumerate(valeurs, start=1):
+            j.client.injecter(*mesure(id_joueur, valeur, echange, manche, partie))
+
+
+def parole(joueur="rpi1", tour=1, manche=1, partie=ID_PARTIE):
+    return {"partie": partie, "manche": manche, "joueur": joueur, "tour": tour, "tours": 2, "rang": 1, "sur": 4,
+            "delai": 90, "fin": ID_PARTIE + 90}
+
+
+def donner_la_parole(j, **champs):
+    j.client.injecter("iot/partie/parole", parole(**champs))
+
+
 # --- Rôle et partie en cours --------------------------------------------------
 
 
-def test_role_cree_la_partie(joueur_jeu, donner_role):
-    donner_role("espion")
+def test_capteur_honnete_publie_la_meteo_de_sa_ville(en_partie, annoncer_phase):
+    j = en_partie("normal")
 
-    assert (joueur_jeu.partie.id, joueur_jeu.partie.role) == (ID_PARTIE, "espion")
+    annoncer_phase("mesures")
 
-
-def test_role_recu_deux_fois_garde_la_partie_en_cours(en_partie, donner_role):
-    j = en_partie()
-    j.client.injecter(*mesure("rpi2", 12.0))
-
-    donner_role("normal")
-
-    assert j.partie.manche(1).mesures == {"rpi2": [12.0]}
+    assert {m["temperature"] for m in temperatures(j)} == {12.3}
 
 
-def test_role_inconnu_est_ignore(joueur_jeu, donner_role):
+def test_sans_role_le_joueur_ne_mesure_pas(joueur_jeu, annoncer_phase):
+    annoncer_phase("mesures")
+
+    assert temperatures(joueur_jeu) == []
+
+
+def test_role_inconnu_est_ignore(joueur_jeu, donner_role, annoncer_phase):
     donner_role("roi")
 
-    assert joueur_jeu.partie is None
+    annoncer_phase("mesures")
+
+    assert temperatures(joueur_jeu) == []
 
 
-def test_etat_d_une_autre_partie_oublie_la_partie_en_cours(en_partie, annoncer_phase):
+def test_role_recu_deux_fois_garde_ce_qui_a_ete_entendu(en_partie, donner_role, annoncer_phase):
+    j = en_partie()
+    publier_mesures(j, {**STABLES, "rpi3": INSTABLE})
+
+    donner_role("normal")   # renvoyé par le maître après une reconnexion
+    annoncer_phase("vote")
+
+    assert votes(j)[0]["calcul"] == "rpi3"
+
+
+def test_etat_d_une_autre_partie_met_fin_a_la_partie_en_cours(en_partie, annoncer_phase):
     j = en_partie()
 
-    annoncer_phase("mesures", partie=AUTRE_PARTIE)
+    annoncer_phase("debat", partie=AUTRE_PARTIE)
+    annoncer_phase("mesures")
 
-    assert j.partie is None
+    assert temperatures(j) == []
 
 
 @pytest.mark.parametrize("etat", ["inscription", "arret"])
-def test_inscription_ou_arret_oublie_la_partie_en_cours(en_partie, joueur_jeu, etat):
+def test_inscription_ou_arret_met_fin_a_la_partie_en_cours(en_partie, annoncer_phase, etat):
     j = en_partie()
 
     j.client.injecter("iot/partie/etat", {"etat": etat}, retain=True)
+    annoncer_phase("mesures")
 
-    assert j.partie is None
+    assert temperatures(j) == []
 
 
-def test_etat_recopie_les_vivants_et_la_manche(en_partie, annoncer_phase):
+def test_elimine_ne_mesure_ni_ne_vote(en_partie, annoncer_phase):
     j = en_partie()
+    publier_mesures(j, {**STABLES, "rpi3": INSTABLE})
 
-    annoncer_phase("debat", manche=2, vivants=["rpi1", "rpi3"])
+    annoncer_phase("mesures", manche=2, vivants=["rpi2", "rpi3", "rpi4"])
+    annoncer_phase("vote", manche=2, vivants=["rpi2", "rpi3", "rpi4"])
 
-    assert (j.partie.vivants, j.partie.numero) == (["rpi1", "rpi3"], 2)
+    assert j.client.publications == []
+
+
+def test_vote_ne_suit_pas_le_llm_vers_un_elimine(en_partie, annoncer_phase, llm):
+    j = en_partie()
+    publier_mesures(j, {**STABLES, "rpi3": INSTABLE})
+    llm.vote = '{"suspect": "rpi2", "raison": "Mimi ment."}'
+
+    annoncer_phase("vote", vivants=["rpi1", "rpi3", "rpi4"])   # rpi2 a été éliminé
+
+    assert votes(j)[0]["suspect"] == "rpi3"
 
 
 # --- Une seule action par phase -----------------------------------------------
 
 
-@pytest.mark.parametrize(("phase", "action"), [("mesures", "mesurer"), ("vote", "voter"), ("verdict", "memoriser")])
-def test_phase_lance_son_action(en_partie, annoncer_phase, lances, phase, action):
-    en_partie()
-
-    annoncer_phase(phase)
-
-    assert lances() == [action]
-
-
-def test_etat_retenu_recu_deux_fois_ne_lance_qu_une_mesure(en_partie, annoncer_phase, lances):
-    en_partie()
+def test_etat_retenu_recu_deux_fois_ne_mesure_qu_une_fois(en_partie, annoncer_phase):
+    j = en_partie()
 
     annoncer_phase("mesures")
     annoncer_phase("mesures")   # reconnexion : le broker renvoie le message retenu
 
-    assert lances() == ["mesurer"]
+    assert len(temperatures(j)) == 5
 
 
-def test_nouvelle_manche_relance_la_mesure(en_partie, annoncer_phase, lances):
-    en_partie()
+def test_nouvelle_manche_relance_la_mesure(en_partie, annoncer_phase):
+    j = en_partie()
 
     annoncer_phase("mesures", manche=1)
     annoncer_phase("mesures", manche=2)
 
-    assert lances() == ["mesurer", "mesurer"]
+    assert [m["manche"] for m in temperatures(j)] == [1] * 5 + [2] * 5
 
 
-def test_etat_retenu_recu_avant_le_role_lance_la_phase_a_l_arrivee_du_role(annoncer_phase, donner_role, lances):
+def test_etat_recu_avant_le_role_la_phase_demarre_a_l_arrivee_du_role(joueur_jeu, annoncer_phase, donner_role):
     annoncer_phase("mesures")   # le joueur démarre en pleine phase : l'état retenu arrive avant le rôle
-    assert lances() == []
 
     donner_role()
 
-    assert lances() == ["mesurer"]
+    assert len(temperatures(joueur_jeu)) == 5
 
 
-def test_phase_de_debat_ne_lance_rien(en_partie, annoncer_phase, lances):
-    en_partie()
-
-    annoncer_phase("debat", manche=1, tours=2)
-
-    assert lances() == []
-
-
-def test_elimine_ne_mesure_ni_ne_vote(en_partie, annoncer_phase, lances):
-    en_partie()
-
-    annoncer_phase("mesures", manche=2, vivants=["rpi2", "rpi3", "rpi4"])
-    annoncer_phase("vote", manche=2, vivants=["rpi2", "rpi3", "rpi4"])
-
-    assert lances() == []
-
-
-def test_phase_d_une_partie_sans_role_ne_lance_rien(joueur_jeu, annoncer_phase, lances):
-    annoncer_phase("mesures")
-
-    assert lances() == []
-
-
-def parole(joueur="rpi1", tour=1, partie=ID_PARTIE):
-    return {"partie": partie, "manche": 1, "joueur": joueur, "tour": tour, "tours": 2, "rang": 1, "sur": 4,
-            "delai": 90, "fin": ID_PARTIE + 90}
-
-
-def test_parole_pour_moi_lance_une_seule_prise_de_parole(en_partie, lances):
+def test_debat_ne_publie_rien_sans_avoir_la_parole(en_partie, annoncer_phase):
     j = en_partie()
 
-    j.client.injecter("iot/partie/parole", parole())
-    j.client.injecter("iot/partie/parole", parole())
+    annoncer_phase("debat", tours=2)
 
-    assert lances() == ["parler"]
+    assert j.client.publications == []
 
 
-def test_parole_au_tour_suivant_relance_une_prise_de_parole(en_partie, lances):
+def test_etat_de_vote_recu_deux_fois_ne_vote_qu_une_fois(en_partie, annoncer_phase):
+    j = en_partie()
+    publier_mesures(j, {**STABLES, "rpi3": INSTABLE})
+
+    annoncer_phase("vote")
+    annoncer_phase("vote")
+
+    assert len(votes(j)) == 1
+
+
+def test_parole_recue_deux_fois_ne_parle_qu_une_fois(en_partie):
     j = en_partie()
 
-    j.client.injecter("iot/partie/parole", parole(tour=1))
-    j.client.injecter("iot/partie/parole", parole(tour=2))
+    donner_la_parole(j)
+    donner_la_parole(j)
 
-    assert lances() == ["parler", "parler"]
+    assert len(repliques(j)) == 1
 
 
-def test_parole_pour_un_autre_est_ignoree(en_partie, lances):
+def test_parole_au_tour_suivant_parle_de_nouveau(en_partie):
     j = en_partie()
 
-    j.client.injecter("iot/partie/parole", parole(joueur="rpi2"))
+    donner_la_parole(j, tour=1)
+    donner_la_parole(j, tour=2)
 
-    assert lances() == []
+    assert [r["tour"] for r in repliques(j)] == [1, 2]
 
 
-def test_parole_d_une_autre_partie_est_ignoree(en_partie, lances):
+def test_parole_donnee_a_un_autre_le_joueur_se_tait(en_partie):
     j = en_partie()
 
-    j.client.injecter("iot/partie/parole", parole(partie=AUTRE_PARTIE))
+    donner_la_parole(j, joueur="rpi2")
 
-    assert lances() == []
+    assert repliques(j) == []
+
+
+def test_parole_d_une_autre_partie_ignoree(en_partie):
+    j = en_partie()
+
+    donner_la_parole(j, partie=AUTRE_PARTIE)
+
+    assert repliques(j) == []
 
 
 # --- Ce que le joueur retient des autres --------------------------------------
 
 
-def test_temperature_des_autres_est_retenue_par_manche(en_partie):
+def test_mesures_des_autres_designent_le_suspect_du_calcul(en_partie, annoncer_phase):
     j = en_partie()
+    publier_mesures(j, {**STABLES, "rpi3": INSTABLE})
 
-    j.client.injecter(*mesure("rpi2", 12.4, manche=1))
-    j.client.injecter(*mesure("rpi2", 13.0, manche=2))
+    annoncer_phase("vote")
 
-    assert (j.partie.manche(1).mesures, j.partie.manche(2).mesures) == ({"rpi2": [12.4]}, {"rpi2": [13.0]})
+    assert votes(j)[0]["calcul"] == "rpi3"
 
 
-def test_temperature_d_une_autre_partie_est_ignoree(en_partie):
+def test_mesures_de_chaque_manche_comptent_separement(en_partie, annoncer_phase):
     j = en_partie()
+    publier_mesures(j, {"rpi2": [12.0] * 5, "rpi3": INSTABLE, "rpi4": [12.1] * 5}, manche=1)
+    publier_mesures(j, {"rpi2": [12.0] * 5, "rpi3": [12.1] * 5, "rpi4": INSTABLE}, manche=2)
 
-    j.client.injecter(*mesure("rpi2", 12.4, partie=AUTRE_PARTIE))
+    annoncer_phase("vote", manche=2)
 
-    assert j.partie.manche(1).mesures == {}
+    assert votes(j)[0]["calcul"] == "rpi4"
 
 
-def test_temperature_qui_n_est_pas_un_nombre_est_ignoree(en_partie):
+def test_mesures_d_une_autre_partie_ignorees(en_partie, annoncer_phase):
     j = en_partie()
-    topic, contenu = mesure("rpi2", "12.4")
+    publier_mesures(j, STABLES)
+    publier_mesures(j, {"rpi3": INSTABLE}, partie=AUTRE_PARTIE)
 
-    j.client.injecter(topic, contenu)
+    annoncer_phase("vote")
 
-    assert j.partie.manche(1).mesures == {}
+    assert votes(j)[0]["calcul"] != "rpi3"
 
 
-@pytest.mark.xfail(reason="bug : une mesure reçue deux fois (QoS 1) est ajoutée deux fois, "
-                          "ce qui décale les échanges comparés par analyser()")
-def test_temperature_recue_deux_fois_n_est_retenue_qu_une_fois(en_partie):
+def test_temperature_qui_n_est_pas_un_nombre_ignoree(en_partie, annoncer_phase):
     j = en_partie()
+    publier_mesures(j, {**STABLES, "rpi3": [str(v) for v in INSTABLE]})
 
-    j.client.injecter(*mesure("rpi2", 12.4, echange=1))
-    j.client.injecter(*mesure("rpi2", 12.4, echange=1))
+    annoncer_phase("vote")
 
-    assert j.partie.manche(1).mesures == {"rpi2": [12.4]}
+    assert votes(j)[0]["calcul"] != "rpi3"
 
 
-def test_chat_des_autres_est_retenu(en_partie):
+@pytest.mark.xfail(reason="bug : une mesure reçue deux fois (QoS 1) est ajoutée deux fois ; les échanges suivants "
+                          "sont décalés et le calcul accuse un capteur honnête")
+def test_mesure_recue_deux_fois_ne_fausse_pas_le_calcul(en_partie, annoncer_phase):
+    # Les températures montent pour tout le monde ; rpi4 est décalé de 0,6 °C (l'espion)
     j = en_partie()
+    honnete = [11.0, 12.0, 13.0, 14.0, 15.0]
+    publier_mesures(j, {"rpi2": honnete, "rpi4": [v + 0.6 for v in honnete]})
+    j.client.injecter(*mesure("rpi3", honnete[0], echange=1))   # premier échange de rpi3 reçu en double
+    publier_mesures(j, {"rpi3": honnete})
 
+    annoncer_phase("vote")
+
+    assert votes(j)[0]["calcul"] == "rpi4"
+
+
+def test_repliques_des_autres_transmises_au_llm(en_partie, llm):
+    j = en_partie()
     j.client.injecter("iot/chat/rpi2", {"text": "Kaito ment.", "partie": ID_PARTIE, "manche": 1, "tour": 1})
 
-    assert j.partie.manche(1).debat == [("rpi2", "Kaito ment.")]
+    donner_la_parole(j)
+
+    assert "« Kaito ment. »" in llm.prompts()[-1]
 
 
-def test_chat_d_une_autre_partie_est_ignore(en_partie):
+def test_replique_d_une_autre_partie_pas_transmise_au_llm(en_partie, llm):
     j = en_partie()
-
     j.client.injecter("iot/chat/rpi2", {"text": "Vieux message.", "partie": AUTRE_PARTIE, "manche": 1})
 
-    assert j.partie.manche(1).debat == []
+    donner_la_parole(j)
+
+    assert "Vieux message." not in llm.prompts()[-1]
 
 
-@pytest.mark.xfail(reason="bug : une réplique reçue deux fois (QoS 1) apparaît deux fois dans le débat du LLM")
-def test_chat_recu_deux_fois_n_est_retenu_qu_une_fois(en_partie):
+@pytest.mark.xfail(reason="bug : une réplique reçue deux fois (QoS 1) apparaît deux fois dans le débat montré au LLM")
+def test_replique_recue_deux_fois_transmise_une_fois(en_partie, llm):
     j = en_partie()
     message = {"text": "Kaito ment.", "partie": ID_PARTIE, "manche": 1, "tour": 1}
-
     j.client.injecter("iot/chat/rpi2", message)
     j.client.injecter("iot/chat/rpi2", message)
 
-    assert j.partie.manche(1).debat == [("rpi2", "Kaito ment.")]
+    donner_la_parole(j)
+
+    assert llm.prompts()[-1].count("Kaito ment.") == 1
 
 
-def test_vote_des_autres_est_retenu_une_fois(en_partie):
+def test_verdict_rappele_au_llm_a_la_manche_suivante(en_partie, annoncer_phase, llm):
     j = en_partie()
-    vote = {"votant": "rpi2", "suspect": "rpi3", "partie": ID_PARTIE, "manche": 1}
+    j.client.injecter("iot/partie/verdict", {"partie": ID_PARTIE, "manche": 1, "votes": {"rpi1": "rpi2"},
+                                             "compte": {"rpi2": 3}, "elimine": "rpi2", "etait_espion": False})
+    annoncer_phase("debat", manche=2, vivants=["rpi1", "rpi3", "rpi4"])
 
-    j.client.injecter("iot/votes/rpi2", vote)
-    j.client.injecter("iot/votes/rpi2", vote)
+    donner_la_parole(j, manche=2)
 
-    assert j.partie.manche(1).votes == {"rpi2": "rpi3"}
+    assert "rpi2 a été éliminé avec 3 vote(s) : il n'était PAS l'espion." in llm.prompts()[-1]
 
 
-def test_verdict_est_retenu_pour_la_memoire(en_partie):
+def test_votes_des_autres_rappeles_au_llm_a_la_manche_suivante(en_partie, annoncer_phase, llm):
     j = en_partie()
-    verdict = {"partie": ID_PARTIE, "manche": 1, "elimine": "rpi2", "etait_espion": False}
+    j.client.injecter("iot/votes/rpi2", {"votant": "rpi2", "suspect": "rpi3", "partie": ID_PARTIE, "manche": 1})
+    j.client.injecter("iot/partie/verdict", {"partie": ID_PARTIE, "manche": 1, "elimine": None, "egalite": True})
+    annoncer_phase("debat", manche=2)
 
-    j.client.injecter("iot/partie/verdict", verdict)
+    donner_la_parole(j, manche=2)
 
-    assert j.partie.manche(1).verdict == verdict
+    assert "- Votes : rpi2 contre rpi3." in llm.prompts()[-1]
 
 
-def test_verdict_d_une_autre_partie_est_ignore(en_partie):
+def test_verdict_d_une_autre_partie_pas_rappele(en_partie, annoncer_phase, llm):
     j = en_partie()
+    j.client.injecter("iot/partie/verdict", {"partie": AUTRE_PARTIE, "manche": 1, "elimine": "rpi2", "etait_espion": True})
+    annoncer_phase("debat", manche=2)
 
-    j.client.injecter("iot/partie/verdict", {"partie": AUTRE_PARTIE, "manche": 1, "elimine": "rpi2"})
+    donner_la_parole(j, manche=2)
 
-    assert j.partie.manche(1).verdict is None
-
-
-def test_presence_retient_le_nom_et_la_ville(joueur_jeu):
-    joueur_jeu.client.injecter("iot/joueurs/rpi2", {"id": "rpi2", "en_ligne": True, "nom": "Mimi", "ville": "Seynod"})
-    joueur_jeu.client.injecter("iot/joueurs/rpi3", {"id": "rpi3", "en_ligne": True})
-
-    assert joueur_jeu.noms == {"rpi2": "Mimi", "rpi3": "rpi3"}
-    assert joueur_jeu.villes == {"rpi2": "Seynod", "rpi3": "?"}
+    assert "éliminé" not in llm.prompts()[-1]
 
 
-def test_depart_garde_le_nom(joueur_jeu):
-    joueur_jeu.client.injecter("iot/joueurs/rpi2", {"id": "rpi2", "en_ligne": True, "nom": "Mimi"})
-
-    joueur_jeu.client.injecter("iot/joueurs/rpi2", {"id": "rpi2", "en_ligne": False})
-
-    assert joueur_jeu.noms["rpi2"] == "Mimi"
-
-
-def test_message_malforme_ne_plante_pas(en_partie):
+def test_noms_des_autres_transmis_au_llm(en_partie, llm):
     j = en_partie()
+    j.client.injecter("iot/joueurs/rpi2", {"id": "rpi2", "en_ligne": True, "nom": "Mimi", "ville": "Seynod"})
 
+    donner_la_parole(j)
+
+    assert "Mimi" in llm.prompts()[-1]
+
+
+def test_joueur_parti_garde_son_nom(en_partie, llm):
+    j = en_partie()
+    j.client.injecter("iot/joueurs/rpi2", {"id": "rpi2", "en_ligne": True, "nom": "Mimi"})
+    j.client.injecter("iot/joueurs/rpi2", {"id": "rpi2", "en_ligne": False})
+
+    donner_la_parole(j)
+
+    assert "Mimi" in llm.prompts()[-1]
+
+
+def test_messages_malformes_ne_l_empechent_pas_de_jouer(en_partie, annoncer_phase):
+    j = en_partie()
     for topic in ("iot/partie/etat", "iot/role/rpi1", "iot/capteurs/rpi2/temperature", "iot/chat/rpi2",
                   "iot/votes/rpi2", "iot/partie/verdict", "iot/partie/parole", "iot/joueurs/rpi2"):
         j.client.injecter(topic, b"\xff{pas du json")
+    publier_mesures(j, {**STABLES, "rpi3": INSTABLE})
 
-    assert j.partie is not None
+    annoncer_phase("vote")
+
+    assert len(votes(j)) == 1
 
 
 # --- Mesures ------------------------------------------------------------------
 
 
-@pytest.fixture
-def phase_mesures(en_partie, annoncer_phase, monkeypatch):
-    """La phase de mesures est ouverte. meteo(valeurs ou fonction) règle ce que renvoie l'API météo."""
-    def ouvrir(role="normal", meteo=12.34):
-        j = en_partie(role)
-        etat = annoncer_phase("mesures", echanges=5)
-        monkeypatch.setattr(j.meteo, "temperature", meteo if callable(meteo) else lambda: meteo)
-        return j, etat
-    return ouvrir
+def test_mesure_publie_cinq_temperatures_conformes_au_protocole(en_partie, annoncer_phase):
+    j = en_partie()
+
+    annoncer_phase("mesures")
+
+    assert [m["echange"] for m in temperatures(j)] == [1, 2, 3, 4, 5]
+    assert temperatures(j)[0] == {"id": "rpi1", "ville": "Annecy", "temperature": 12.3, "echange": 1, "manche": 1,
+                                  "partie": ID_PARTIE, "ts": ID_PARTIE}
 
 
-def test_mesure_publie_cinq_temperatures(phase_mesures):
-    j, etat = phase_mesures()
+def test_mesure_toutes_les_cinq_secondes(en_partie, annoncer_phase):
+    j = en_partie()
 
-    j.mesurer(etat)
+    annoncer_phase("mesures")
 
-    publiees = j.client.publies("iot/capteurs/rpi1/temperature")
-    assert [m["echange"] for m in publiees] == [1, 2, 3, 4, 5]
-    assert publiees[0] == {"id": "rpi1", "ville": "Annecy", "temperature": 12.3, "echange": 1, "manche": 1,
-                           "partie": ID_PARTIE, "ts": ID_PARTIE}
+    assert [m["ts"] - ID_PARTIE for m in temperatures(j)] == [0, 5, 10, 15, 20]
 
 
-def test_mesure_toutes_les_cinq_secondes(phase_mesures, temps):
-    j, etat = phase_mesures()
-
-    j.mesurer(etat)
-
-    assert temps.sommeils == [5, 5, 5, 5, 5]
-
-
-def test_mesure_garde_le_rythme_si_la_meteo_est_lente(phase_mesures, temps):
+def test_mesure_garde_le_rythme_si_la_meteo_est_lente(en_partie, annoncer_phase, meteo_service, temps):
     def meteo_lente():
-        temps.maintenant += 2
+        temps.maintenant += 2   # Open-Meteo met 2 s à répondre
         return 12.0
-    j, etat = phase_mesures(meteo=meteo_lente)
+    meteo_service.valeur = meteo_lente
+    j = en_partie()
 
-    j.mesurer(etat)
+    annoncer_phase("mesures")
 
-    assert temps.sommeils == [3, 3, 3, 3, 3]
+    assert [m["ts"] - ID_PARTIE for m in temperatures(j)] == [2, 7, 12, 17, 22]
 
 
-def test_mesure_s_arrete_quand_la_phase_change(phase_mesures, annoncer_phase):
+def test_mesure_s_arrete_quand_la_phase_change(en_partie, annoncer_phase, meteo_service):
     appels = []
 
     def meteo():
         appels.append(1)
         if len(appels) == 2:
-            annoncer_phase("debat")
+            annoncer_phase("debat")   # le maître passe au débat avant la fin des 5 échanges
         return 12.0
-    j, etat = phase_mesures(meteo=meteo)
+    meteo_service.valeur = meteo
+    j = en_partie()
 
-    j.mesurer(etat)
+    annoncer_phase("mesures")
 
-    assert len(j.client.publies("iot/capteurs/rpi1/temperature")) == 2
-
-
-def test_mesure_sans_meteo_ne_publie_rien(phase_mesures):
-    j, etat = phase_mesures(meteo=None)
-
-    j.mesurer(etat)
-
-    assert j.client.publies("iot/capteurs/rpi1/temperature") == []
+    assert len(temperatures(j)) == 2
 
 
-def test_l_espion_publie_une_fausse_temperature(phase_mesures, monkeypatch):
-    j, etat = phase_mesures("espion")
-    monkeypatch.setattr(j, "fausse_temperature", lambda manche: 99.0)
+def test_mesure_sans_meteo_ne_publie_rien(en_partie, annoncer_phase, meteo_service):
+    meteo_service.valeur = None
+    j = en_partie()
 
-    j.mesurer(etat)
+    annoncer_phase("mesures")
 
-    assert {m["temperature"] for m in j.client.publies("iot/capteurs/rpi1/temperature")} == {99.0}
+    assert temperatures(j) == []
 
 
-# --- Fausse température de l'espion -------------------------------------------
+# --- Fausses températures de l'espion -----------------------------------------
 
 
 @pytest.fixture
-def espion(en_partie, monkeypatch):
-    """rpi1 est l'espion. tirages(ecart, sens) fixe le hasard : décalage de ecart (0,05 à 0,10), vers le haut (+1) ou le bas (-1)."""
-    j = en_partie("espion")
-
-    def tirages(ecart=0.10, sens=1):
+def tirages(monkeypatch):
+    """tirages(ecart, sens) fixe le hasard de l'espion : décalage de ecart (0,05 à 0,10), vers le haut (+1) ou le bas (-1)."""
+    def fixer(ecart=0.10, sens=1):
         monkeypatch.setattr(random, "uniform", lambda a, b: ecart)
         monkeypatch.setattr(random, "choice", lambda sequence: sens)
-    j.tirages = tirages
-    return j
+    return fixer
 
 
-def test_espion_part_de_la_moyenne_des_dernieres_valeurs_des_autres(espion):
-    espion.tirages(ecart=0.10, sens=1)
-    for topic, contenu in (mesure("rpi2", 30.0), mesure("rpi2", 12.0, echange=2), mesure("rpi3", 14.0)):
-        espion.client.injecter(topic, contenu)
-
-    assert espion.fausse_temperature(1) == pytest.approx(13.0 * 1.10)
+def fausse_temperature_publiee(j, annoncer_phase, manche=1):
+    annoncer_phase("mesures", manche=manche)
+    return temperatures(j)[-1]["temperature"]
 
 
-def test_espion_ignore_ses_propres_valeurs(espion):
-    espion.tirages(ecart=0.10, sens=-1)
-    espion.client.injecter(*mesure("rpi1", 50.0))
-    espion.client.injecter(*mesure("rpi2", 20.0))
+def test_espion_part_de_la_moyenne_des_dernieres_valeurs_des_autres(en_partie, annoncer_phase, tirages):
+    j = en_partie("espion")
+    tirages(ecart=0.10, sens=1)
+    publier_mesures(j, {"rpi2": [30.0, 12.0], "rpi3": [14.0]})   # dernières valeurs : 12 et 14, moyenne 13
 
-    assert espion.fausse_temperature(1) == pytest.approx(18.0)
-
-
-def test_espion_ecart_minimum_pres_de_zero(espion):
-    espion.tirages(ecart=0.05, sens=1)
-    espion.client.injecter(*mesure("rpi2", 1.0))
-
-    assert espion.fausse_temperature(1) == pytest.approx(1.3)
+    assert fausse_temperature_publiee(j, annoncer_phase) == 14.3
 
 
-def test_espion_temperature_negative(espion):
-    espion.tirages(ecart=0.10, sens=1)
-    espion.client.injecter(*mesure("rpi2", -10.0))
+def test_espion_ignore_ses_propres_valeurs(en_partie, annoncer_phase, tirages):
+    j = en_partie("espion")
+    tirages(ecart=0.10, sens=-1)
+    publier_mesures(j, {"rpi1": [50.0], "rpi2": [20.0]})
 
-    assert espion.fausse_temperature(1) == pytest.approx(-9.0)
-
-
-def test_espion_decale_de_cinq_a_dix_pour_cent(espion):
-    espion.client.injecter(*mesure("rpi2", 20.0))
-
-    ecarts = [abs(espion.fausse_temperature(1) - 20.0) / 20.0 for _ in range(200)]
-
-    assert all(0.05 <= e <= 0.10 for e in ecarts)
+    assert fausse_temperature_publiee(j, annoncer_phase) == 18.0
 
 
-def test_espion_decale_vers_le_haut_et_vers_le_bas(espion):
-    espion.client.injecter(*mesure("rpi2", 20.0))
+def test_espion_ecart_minimum_pres_de_zero(en_partie, annoncer_phase, tirages):
+    j = en_partie("espion")
+    tirages(ecart=0.05, sens=1)
+    publier_mesures(j, {"rpi2": [1.0]})   # 5 % de 1 °C ne se verrait pas : au moins 0,3 °C
 
-    valeurs = {espion.fausse_temperature(1) > 20.0 for _ in range(200)}
-
-    assert valeurs == {True, False}
-
-
-def test_espion_sans_mesure_des_autres_part_de_sa_vraie_temperature(espion, monkeypatch):
-    espion.tirages(ecart=0.10, sens=-1)
-    monkeypatch.setattr(espion.meteo, "temperature", lambda: 10.0)
-
-    assert espion.fausse_temperature(1) == pytest.approx(9.0)
+    assert fausse_temperature_publiee(j, annoncer_phase) == 1.3
 
 
-def test_espion_sans_aucune_donnee_ne_publie_rien(espion, monkeypatch):
-    monkeypatch.setattr(espion.meteo, "temperature", lambda: None)
+def test_espion_temperature_negative(en_partie, annoncer_phase, tirages):
+    j = en_partie("espion")
+    tirages(ecart=0.10, sens=1)
+    publier_mesures(j, {"rpi2": [-10.0]})
 
-    assert espion.fausse_temperature(1) is None
+    assert fausse_temperature_publiee(j, annoncer_phase) == -9.0
+
+
+def test_espion_decale_de_cinq_a_dix_pour_cent_vers_le_haut_ou_le_bas(en_partie, annoncer_phase):
+    j = en_partie("espion")
+    for manche in range(1, 41):
+        publier_mesures(j, {"rpi2": [100.0]}, manche=manche)
+        annoncer_phase("mesures", manche=manche)
+
+    publiees = [m["temperature"] for m in temperatures(j)]
+    assert len(publiees) == 200
+    assert all(0.0495 <= abs(t - 100.0) / 100.0 <= 0.1005 for t in publiees)   # arrondi au dixième
+    assert {t > 100.0 for t in publiees} == {True, False}
+
+
+def test_espion_sans_mesure_des_autres_part_de_sa_vraie_temperature(en_partie, annoncer_phase, tirages, meteo_service):
+    meteo_service.valeur = 10.0
+    j = en_partie("espion")
+    tirages(ecart=0.10, sens=-1)
+
+    assert fausse_temperature_publiee(j, annoncer_phase) == 9.0
+
+
+def test_espion_sans_aucune_donnee_ne_publie_rien(en_partie, annoncer_phase, meteo_service):
+    meteo_service.valeur = None
+    j = en_partie("espion")
+
+    annoncer_phase("mesures")
+
+    assert temperatures(j) == []
 
 
 # --- Vote, parole, mémoire ----------------------------------------------------
 
 
-@pytest.fixture
-def phase_vote(en_partie, annoncer_phase, monkeypatch):
-    """La phase de vote est ouverte ; le cerveau vote contre rpi3 (le calcul dit rpi2). Renvoie (joueur, etat, appels)."""
+def test_vote_publie_suspect_raison_et_calcul(en_partie, annoncer_phase):
     j = en_partie()
-    etat = annoncer_phase("vote")
-    appels = []
+    publier_mesures(j, {"rpi2": INSTABLE, "rpi3": [12.0] * 5, "rpi4": [12.1] * 5})   # le calcul accuse rpi2
 
-    def voter(partie, delai):
-        appels.append(delai)
-        return "rpi3", "Ses valeurs sautent.", "rpi2"
-    monkeypatch.setattr(j.ia, "voter", voter)
-    return j, etat, appels
+    annoncer_phase("vote")
+
+    assert votes(j) == [{"votant": "rpi1", "suspect": "rpi3", "raison": "Ses valeurs sautent.", "calcul": "rpi2",
+                         "strategie": "llm", "partie": ID_PARTIE, "manche": 1}]
 
 
-def test_vote_publie_suspect_raison_et_calcul(phase_vote):
-    j, etat, _ = phase_vote
-
-    j.voter(etat)
-
-    assert j.client.dernier("iot/votes/rpi1") == {"votant": "rpi1", "suspect": "rpi3", "raison": "Ses valeurs sautent.",
-                                                  "calcul": "rpi2", "strategie": "llm", "partie": ID_PARTIE, "manche": 1}
-
-
-def test_vote_laisse_dix_secondes_de_marge_avant_la_fin(phase_vote):
-    j, etat, appels = phase_vote
-
-    j.voter(etat)
-
-    assert appels == [50]   # la phase finit dans 60 s
-
-
-def test_vote_trop_tard_n_est_pas_publie(phase_vote, annoncer_phase, monkeypatch):
-    j, etat, _ = phase_vote
-
-    def voter_lentement(partie, delai):
-        annoncer_phase("verdict")   # le maître a clos le vote pendant que le LLM réfléchissait
-        return "rpi3", "Trop tard.", "rpi3"
-    monkeypatch.setattr(j.ia, "voter", voter_lentement)
-
-    j.voter(etat)
-
-    assert j.client.publies("iot/votes/rpi1") == []
-
-
-def test_vote_sans_suspect_n_est_pas_publie(phase_vote, monkeypatch):
-    j, etat, _ = phase_vote
-    monkeypatch.setattr(j.ia, "voter", lambda partie, delai: (None, "aucune donnée", None))
-
-    j.voter(etat)
-
-    assert j.client.publies("iot/votes/rpi1") == []
-
-
-def test_parler_publie_la_replique_dans_le_chat(en_partie, monkeypatch):
+def test_vote_laisse_dix_secondes_de_marge_au_llm(en_partie, annoncer_phase, llm):
     j = en_partie()
-    monkeypatch.setattr(j.ia, "parler", lambda partie, tour, tours, delai: "Kaito, explique-toi.")
+    publier_mesures(j, STABLES)
 
-    j.parler(parole(tour=2))
+    annoncer_phase("vote")   # la phase finit dans 60 s
 
-    assert j.client.dernier("iot/chat/rpi1") == {"text": "Kaito, explique-toi.", "partie": ID_PARTIE, "manche": 1, "tour": 2}
+    assert llm.requetes[-1]["timeout"] == 50
 
 
-def test_parler_trop_tard_ne_publie_rien(en_partie, temps, monkeypatch):
+def test_vote_trop_tard_n_est_pas_publie(en_partie, annoncer_phase, llm):
+    j = en_partie()
+    publier_mesures(j, STABLES)
+    llm.pendant = lambda corps: annoncer_phase("verdict")   # le maître clôt le vote pendant que le LLM réfléchit
+
+    annoncer_phase("vote")
+
+    assert votes(j) == []
+
+
+def test_vote_sans_aucune_donnee_ni_avis_du_llm_n_est_pas_publie(en_partie, annoncer_phase, llm):
+    j = en_partie()
+    llm.vote = "Je ne sais pas."
+
+    annoncer_phase("vote")
+
+    assert votes(j) == []
+
+
+def test_parole_publie_la_replique_dans_le_chat(en_partie):
     j = en_partie()
 
-    def parler_lentement(partie, tour, tours, delai):
+    donner_la_parole(j, tour=2)
+
+    assert repliques(j) == [{"text": "Kaito, explique-toi.", "partie": ID_PARTIE, "manche": 1, "tour": 2}]
+
+
+def test_parole_trop_tard_n_est_pas_publiee(en_partie, llm, temps):
+    j = en_partie()
+
+    def reflechir_longtemps(corps):
         temps.maintenant += 100   # la parole (90 s) est passée au suivant
-        return "Désolé du retard."
-    monkeypatch.setattr(j.ia, "parler", parler_lentement)
+    llm.pendant = reflechir_longtemps
 
-    j.parler(parole())
+    donner_la_parole(j)
 
-    assert j.client.publies("iot/chat/rpi1") == []
+    assert repliques(j) == []
 
 
-def test_parler_voit_les_noms_des_autres(en_partie, monkeypatch):
+def test_memoire_faits_n_interroge_pas_le_llm_au_verdict(en_partie, annoncer_phase, llm):
+    en_partie()
+
+    annoncer_phase("verdict")
+
+    assert llm.requetes == []
+
+
+@pytest.mark.parametrize("config_joueur", [{"memoire": "resume"}], indirect=True)
+def test_memoire_resume_rappelle_ses_notes_a_la_manche_suivante(en_partie, annoncer_phase, llm):
     j = en_partie()
-    j.client.injecter("iot/joueurs/rpi2", {"id": "rpi2", "en_ligne": True, "nom": "Mimi"})
-    vus = []
-    monkeypatch.setattr(j.ia, "parler", lambda partie, *a, **k: vus.append(partie.nom("rpi2")) or "Ok.")
+    publier_mesures(j, STABLES)
+    llm.parole = "Kaito est louche."
+    annoncer_phase("verdict")
+    annoncer_phase("debat", manche=2)
+    llm.parole = "Je maintiens."
 
-    j.parler(parole())
+    donner_la_parole(j, manche=2)
 
-    assert vus == ["Mimi"]
-
-
-def test_memoire_faits_n_appelle_pas_le_llm(en_partie, annoncer_phase, monkeypatch):
-    j = en_partie()
-    etat = annoncer_phase("verdict")
-    monkeypatch.setattr(j.ia, "resumer", lambda partie, delai: pytest.fail("le LLM ne doit pas être appelé"))
-
-    j.memoriser(etat)
-
-    assert j.partie.souvenirs == {}
+    assert "Tes notes : Kaito est louche." in llm.prompts()[-1]
 
 
-def test_memoire_resume_garde_les_notes_du_llm(en_partie, annoncer_phase, monkeypatch):
-    j = en_partie()
-    j.ia.memoire = "resume"
-    etat = annoncer_phase("verdict")
-    monkeypatch.setattr(j.ia, "resumer", lambda partie, delai: "Kaito est louche.")
+@pytest.mark.parametrize("config_joueur", [{"memoire": "resume"}], indirect=True)
+def test_memoire_resume_une_seule_fois_par_verdict(en_partie, annoncer_phase, llm):
+    en_partie()
 
-    j.memoriser(etat)
+    annoncer_phase("verdict")
+    annoncer_phase("verdict")
 
-    assert j.partie.souvenirs == {1: "Kaito est louche."}
-
-
-def test_instantane_est_une_copie(en_partie):
-    j = en_partie()
-
-    copie = j.instantane()
-    copie.vivants.append("intrus")
-
-    assert "intrus" not in j.partie.vivants
+    assert len(llm.requetes) == 1
 
 
 # --- Présence, connexion, fiche de l'agent ------------------------------------
@@ -586,28 +612,16 @@ def test_fiche_de_l_espion_identique_a_celle_d_un_capteur(joueur_jeu, donner_rol
     # GET /agent ne doit jamais révéler le rôle, même indirectement
     donner_role("espion")
     fiche_espion = joueur_jeu.fiche()
-    joueur_jeu.partie = Partie(ID_PARTIE, "rpi1", "normal")
-    joueur_jeu.partie.vivants = []
+    donner_role("normal", partie=ID_PARTIE + 1)
 
     assert fiche_espion == joueur_jeu.fiche()
     assert "role" not in json.dumps(fiche_espion)
 
 
-def test_sante_indique_broker_et_ollama(joueur_jeu, monkeypatch):
-    monkeypatch.setattr(joueur_jeu.ia, "disponible", lambda: False)
+def test_sante_indique_broker_et_ollama(joueur_jeu):
     joueur_jeu.client.connect("localhost")
 
-    assert joueur_jeu.sante() == {"status": "ok", "id": "rpi1", "broker": True, "ollama": False}
-
-
-def test_encore_vrai_pendant_la_phase_faux_apres(en_partie, annoncer_phase):
-    j = en_partie()
-    etat = annoncer_phase("vote")
-    assert j.encore(etat)
-
-    annoncer_phase("verdict")
-
-    assert not j.encore(etat)
+    assert joueur_jeu.sante() == {"status": "ok", "id": "rpi1", "broker": True, "ollama": True}
 
 
 # --- config.json --------------------------------------------------------------

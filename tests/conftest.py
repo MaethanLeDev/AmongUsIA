@@ -4,6 +4,7 @@ Les tests tournent sans broker, sans Ollama et sans Internet : paho est remplac�
 requests est simulé dans chaque test, et le module time des scripts est remplacé par FauxTemps.
 """
 import argparse
+import copy
 import sys
 from pathlib import Path
 
@@ -54,18 +55,23 @@ def reglages_maitre(tmp_path):
     )
 
 
+# Une config.json type, telle que la renvoie lire_config (valeurs par défaut d'Ollama remplies)
+CONFIG_TYPE = {
+    "id": "rpi1", "ville": "Annecy", "coordonnees": [45.899, 6.129],
+    "broker": {"hote": "localhost", "port": 1883},
+    "ollama": {"url": "http://127.0.0.1:11434", "modele": "qwen3:0.6b"},
+    "personnalite": "Tu es un détective froid et méthodique.",
+    "strategie": "llm", "memoire": "faits",
+    "interface": {"nom": "Sherlock", "arch": "stratege", "couleurs": {"accent": "#c1121f"}},
+    "api": {"port": 0},
+}
+
+
 @pytest.fixture
-def config_joueur():
-    """Une config.json type, telle que la renvoie lire_config (valeurs par défaut d'Ollama remplies)."""
-    return {
-        "id": "rpi1", "ville": "Annecy", "coordonnees": [45.899, 6.129],
-        "broker": {"hote": "localhost", "port": 1883},
-        "ollama": {"url": "http://127.0.0.1:11434", "modele": "qwen3:0.6b"},
-        "personnalite": "Tu es un détective froid et méthodique.",
-        "strategie": "llm", "memoire": "faits",
-        "interface": {"nom": "Sherlock", "arch": "stratege", "couleurs": {"accent": "#c1121f"}},
-        "api": {"port": 0},
-    }
+def config_joueur(request):
+    """Une copie de CONFIG_TYPE. Un test change des réglages avec
+    @pytest.mark.parametrize("config_joueur", [{"memoire": "resume"}], indirect=True)."""
+    return {**copy.deepcopy(CONFIG_TYPE), **getattr(request, "param", {})}
 
 
 @pytest.fixture

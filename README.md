@@ -91,10 +91,29 @@ puis ouvrir http://localhost:5050. `outils/simulation.py` lance un broker de tes
 Arrêtez-la avec **Ctrl+C** dans son terminal : sous Windows, fermer la fenêtre autrement laisse tourner les joueurs en arrière-plan.
 Avec un vrai Ollama installé sur le PC : `--ollama http://127.0.0.1:11434 --modele qwen3:0.6b`. Les options sont détaillées en tête de `outils/simulation.py`.
 
+## Tests
+
+Des tests unitaires, qui tournent sans broker, sans Ollama, sans Internet et sans Raspberry Pi, en quelques secondes :
+
+```bash
+uv run pytest -q                                          # joueur/, maitre_du_jeu/, outils/
+uv run pytest -q --cov=joueur --cov-report=term-missing   # couverture d'un module
+node --test "interface/tests/*.test.js"                   # interface (les tests demandent Node ≥ 20.4)
+```
+
+- **Où les mettre** : `tests/<module>/test_<fichier>.py` pour Python, `interface/tests/<fichier>.test.js` pour l'interface (`node:test`, sans dépendance npm).
+- **Outils communs** : `tests/aides.py` (`FauxClientMQTT` qui remplace paho et permet d'injecter des messages, `FauxTemps`, `FausseReponseHTTP`), les fixtures de `tests/conftest.py` et de chaque `tests/<module>/conftest.py`, et le faux broker de `interface/tests/aides.js`.
+- **Conventions** :
+  - un comportement par test, nommé en français : `test_egalite_personne_n_est_elimine` ;
+  - jamais de vrai réseau : paho est remplacé, `requests` est simulé avec `monkeypatch`, le temps est figé (aucun `sleep` réel) ;
+  - un test qui révèle un bug n'est pas « corrigé » en douce : il est marqué `@pytest.mark.xfail(reason="bug : …")`. Comme `xfail_strict` est activé, le jour où le bug est corrigé, le test passe et pytest le signale : il faut alors retirer la marque.
+- **Sur un Raspberry Pi**, `uv sync --no-dev` évite d'installer pytest.
+
 ## Intégration continue
 
 À chaque push et chaque PR, GitHub Actions ([.github/workflows/ci.yml](.github/workflows/ci.yml)) vérifie :
 - le lint Python (`uvx ruff check`, règles dans `pyproject.toml`) et la compilation de `joueur/`, `maitre_du_jeu/`, `outils/` ;
+- les tests unitaires Python (`uv run pytest -q`) ;
 - la syntaxe du code Node de `interface/` (hors `public/vendor/`) ;
 - le fichier `broker/docker-compose.yml` ;
 - une partie complète simulée (`outils/simulation.py --joueurs 3 --rapide -- --tp`), qui doit se finir par une victoire. En cas d'échec, les journaux des joueurs sont joints au run.
