@@ -6,9 +6,10 @@ de son vote (la méthode sans LLM) ou dans le contexte qu'il envoie au LLM.
 import json
 import random
 
-import joueur
 import pytest
 from aides import ID_PARTIE, FauxClientMQTT, FauxMessage
+
+import joueur
 
 AUTRE_PARTIE = ID_PARTIE - 500
 STABLES = {"rpi2": [12.0] * 5, "rpi4": [12.1] * 5}

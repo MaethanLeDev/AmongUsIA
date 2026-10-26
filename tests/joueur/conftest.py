@@ -5,11 +5,11 @@ une réorganisation de joueur.py ne doit pas casser les tests tant que le compor
 """
 from types import SimpleNamespace
 
-import joueur
 import pytest
 import requests
 from aides import ID_PARTIE, FausseReponseHTTP
 
+import joueur
 from ia import Partie
 
 JOUEURS = ["rpi1", "rpi2", "rpi3", "rpi4"]
