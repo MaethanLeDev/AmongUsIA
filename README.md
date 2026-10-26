@@ -114,7 +114,7 @@ node --test "interface/tests/*.test.js"                   # interface (les tests
 À chaque push et chaque PR, GitHub Actions ([.github/workflows/ci.yml](.github/workflows/ci.yml)) vérifie :
 - le lint Python (`uvx ruff check`, règles dans `pyproject.toml`) et la compilation de `joueur/`, `maitre_du_jeu/`, `outils/` ;
 - les tests unitaires Python (`uv run pytest -q`) ;
-- la syntaxe du code Node de `interface/` (hors `public/vendor/`) ;
+- la syntaxe du code Node de `interface/` (hors `public/vendor/`) et ses tests (`node --test`) ;
 - le fichier `broker/docker-compose.yml` ;
 - une partie complète simulée (`outils/simulation.py --joueurs 3 --rapide -- --tp`), qui doit se finir par une victoire. En cas d'échec, les journaux des joueurs sont joints au run.
 

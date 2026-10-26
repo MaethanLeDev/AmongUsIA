@@ -32,7 +32,7 @@ jobs:
         run: uv run pytest -q
 
   interface:
-    name: Interface (syntaxe Node)
+    name: Interface (syntaxe, tests)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -45,6 +45,9 @@ jobs:
           for f in interface/*.js $(find interface/public -name '*.js' -not -path '*/vendor/*'); do
             node --check "$f"
           done
+      # Motif entre guillemets : Node le développe lui-même (aides.js n'est pas un test)
+      - name: Tests
+        run: node --test "interface/tests/*.test.js"
 
   broker:
     name: Broker (docker compose)
