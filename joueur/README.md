@@ -64,7 +64,7 @@ Lancée avec le joueur, sur le port `api.port` (5000 par défaut). Son URL est a
 | Route            | Corps                                                    | Réponse                                                  |
 |------------------|----------------------------------------------------------|----------------------------------------------------------|
 | `POST /message`  | `{"message": "Salut !", "de": "rpi2"}`                   | `{"reponse": "..."}`. L'agent se souvient de toute la conversation avec chaque interlocuteur (`de`, sinon l'IP). |
-| `GET /health`    |                                                          | `{"status": "ok", "broker": true, "ollama": true}`       |
+| `GET /health`    |                                                          | `{"status": "ok", "broker": true, "ollama": true, "llm": "ok"}` (`llm` : état du LLM, `null` avant le premier essai) |
 | `GET /agent`     |                                                          | nom, modèle, personnalité, capacités, routes, phase de jeu (jamais le rôle) |
 | `POST /discuter` | `{"avec": "http://10.109.150.61:5000", "sujet": "...", "tours": 3}` | l'agent lance une conversation en appelant le `/message` de l'autre |
 

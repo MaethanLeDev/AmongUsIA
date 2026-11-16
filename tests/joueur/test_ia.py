@@ -59,19 +59,20 @@ def test_calcul_designe_le_capteur_instable(partie_type):
     suspect, detail = ia.suspect_par_calcul(partie_type)
 
     assert suspect == "rpi3"
-    assert "amplitude 3.1 °C" in detail
+    assert "change de 3.2 °C" in detail
 
 
-def test_calcul_designe_le_plus_gros_ecart(partie_type):
-    partie_type.manche().mesures = {"rpi1": [12.0] * 3, "rpi2": [12.1] * 3, "rpi3": [12.0] * 3, "rpi4": [13.4] * 3}
+def test_calcul_un_ecart_constant_n_est_pas_suspect(partie_type):
+    # rpi4 est 1.4 °C plus chaud, mais toujours autant : une autre ville. rpi3 varie un peu : c'est lui le suspect.
+    partie_type.manche().mesures = {"rpi1": [12.0] * 3, "rpi2": [12.1] * 3, "rpi3": [12.0, 12.6, 11.8], "rpi4": [13.4] * 3}
 
-    assert ia.suspect_par_calcul(partie_type)[0] == "rpi4"
+    assert ia.suspect_par_calcul(partie_type)[0] == "rpi3"
 
 
 def test_calcul_ne_se_designe_jamais_soi_meme(partie_type):
     partie_type.manche().mesures["rpi1"] = [20.0, 5.0, 20.0, 5.0, 20.0]
 
-    assert ia.suspect_par_calcul(partie_type)[0] == "rpi3"
+    assert ia.suspect_par_calcul(partie_type)[0] != "rpi1"
 
 
 def test_calcul_ignore_un_elimine(partie_type):
@@ -89,7 +90,7 @@ def test_calcul_sans_donnees_ne_designe_personne(partie_type):
 def test_tableau_traduit_la_stabilite_en_mots(partie_type):
     tableau = ia.tableau_mesures(partie_type)
 
-    assert "- Kaito, Poisy : 13.4, 11.0, 13.9, 10.8, 13.6 °C → INSTABLE, varie de 3.1 °C" in tableau
+    assert "- Kaito, Poisy : 13.4, 11.0, 13.9, 10.8, 13.6 °C → INSTABLE : son écart avec les autres change de 3.2 °C" in tableau
     assert "- Sherlock (toi), Annecy" in tableau
     assert "Mimi, Seynod : 12.2, 12.2, 12.3, 12.2, 12.2 °C → STABLE" in tableau
 
@@ -258,7 +259,7 @@ def test_vote_strategie_ecart_sans_appeler_le_llm(config_joueur, partie_type, mo
     suspect, raison, calcul = cerveau.voter(partie_type, delai=30)
 
     assert suspect == calcul == "rpi3"
-    assert raison.startswith("écart")
+    assert raison.startswith("son écart")
 
 
 def test_vote_llm_suit_l_avis_du_llm(cerveau, partie_type, llm_repond):
@@ -317,7 +318,7 @@ def test_parler_renvoie_la_reponse_nettoyee(cerveau, partie_type, llm_repond):
 def test_parler_un_aveu_est_remplace(cerveau, partie_type, llm_repond):
     llm_repond("Bon, je suis l'espion, j'avoue.")
 
-    assert cerveau.parler(partie_type, 1, 2, delai=30) == ia.REPLI_PAROLE
+    assert "Kaito" in cerveau.parler(partie_type, 1, 2, delai=30)   # réplique de secours : accuse avec les chiffres
 
 
 def test_parler_une_negation_n_est_pas_un_aveu(cerveau, partie_type, llm_repond):
@@ -329,10 +330,17 @@ def test_parler_une_negation_n_est_pas_un_aveu(cerveau, partie_type, llm_repond)
 def test_parler_reponse_vide_est_remplacee(cerveau, partie_type, llm_repond):
     llm_repond("<think>rien</think>")
 
-    assert cerveau.parler(partie_type, 1, 2, delai=30) == ia.REPLI_PAROLE
+    assert "Kaito" in cerveau.parler(partie_type, 1, 2, delai=30)   # réplique de secours : accuse avec les chiffres
 
 
 def test_parler_ollama_injoignable(cerveau, partie_type, llm_repond):
+    llm_repond(requests.Timeout("trop lent"))
+
+    assert "Kaito" in cerveau.parler(partie_type, 1, 2, delai=30)   # réplique de secours : accuse avec les chiffres
+
+
+def test_parler_sans_mesures_ni_llm_phrase_neutre(cerveau, partie_type, llm_repond):
+    partie_type.manche().mesures = {}
     llm_repond(requests.Timeout("trop lent"))
 
     assert cerveau.parler(partie_type, 1, 2, delai=30) == ia.REPLI_PAROLE

@@ -51,7 +51,7 @@ def test_health_repond_ok(serveur):
     code, contenu = appeler(serveur, "/health")
 
     assert code == 200
-    assert contenu == {"status": "ok", "id": "rpi1", "broker": False, "ollama": True}
+    assert contenu == {"status": "ok", "id": "rpi1", "broker": False, "ollama": True, "llm": None}
 
 
 def test_agent_decrit_l_agent_et_ses_routes(serveur):
