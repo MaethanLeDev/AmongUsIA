@@ -40,8 +40,12 @@ S'il redémarre en pleine partie, le maître lui renvoie son rôle et il reprend
 
 ## Stratégies
 
-- **`ecart`** : pour chaque joueur, son écart moyen à la médiane des autres, plus l'instabilité de ses valeurs. Une vraie température ne bouge presque pas en 25 s (Open-Meteo ne la met à jour que tous les quarts d'heure), alors que celle de l'espion change à chaque mesure.
-- **`llm`** : le LLM reçoit le tableau des mesures (avec « STABLE » ou « INSTABLE » écrit en toutes lettres, car les petits modèles lisent mal les chiffres), le débat et ses souvenirs, puis répond en JSON. Si la réponse est inexploitable, il revient au calcul.
+- **`ecart`** : à chaque échange, on mesure l'écart de chaque joueur à la médiane des autres, et on accuse celui dont cet écart **varie** le plus.
+  Des villes voisines peuvent avoir plusieurs degrés d'écart chez Open-Meteo (8,2 °C à Épagny, 12,3 °C à Annecy) : un écart constant est normal. Un capteur honnête le garde d'une mesure à l'autre, même si la météo change (tout le monde bouge ensemble). L'espion, qui invente une valeur à chaque fois, ne le garde pas.
+  Rejouée sur 40 manches enregistrées, cette méthode trouve l'espion à chaque vote. L'ancienne (écart moyen + amplitude) n'y arrivait que dans 58 % des cas, car elle accusait les villes plus froides.
+- **`llm`** : le LLM reçoit le tableau des mesures (avec « STABLE : écart constant » ou « INSTABLE : écart qui change » écrit en toutes lettres, car les petits modèles lisent mal les chiffres), le débat et ses souvenirs, puis répond en JSON. Si la réponse est inexploitable, il revient au calcul.
+
+Si Ollama ne répond pas ou si le modèle n'est pas installé, le joueur l'écrit dans son terminal dès le lancement, avec la commande à taper. Sa carte affiche alors « ⚠ LLM injoignable » ou « ⚠ modèle absent » dans l'interface. En attendant, l'IA dit une phrase de secours au débat et vote par calcul.
 
 ## Mémoire entre les manches
 

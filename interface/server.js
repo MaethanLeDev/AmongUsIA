@@ -10,9 +10,12 @@ const os = require('os');
 const createMqtt = require('./mqtt.js');
 const createSpectacle = require('./spectacle.js');
 
-const PORT = Number(process.env.PORT) || 5050;
+// Réglages : node server.js --broker 10.109.150.215 --port 8080   (ou variables d'environnement MQTT_HOST, PORT)
+const arg = nom => { const i = process.argv.indexOf('--' + nom); return i > 1 ? process.argv[i + 1] : undefined; };
+const PORT = Number(arg('port') || process.env.PORT) || 5050;
 const PUBLIC = path.join(__dirname, 'public');
-const BROKERS = (process.env.MQTT_HOST || 'amongus.local,10.109.150.215').split(',').map(s => s.trim()).filter(Boolean);
+// Par défaut : un broker sur ce PC (simulation, ou Pi du broker), sinon celui de Niels par son nom, sinon par son IP
+const BROKERS = (arg('broker') || process.env.MQTT_HOST || 'localhost,amongus.local,10.109.150.215').split(',').map(s => s.trim()).filter(Boolean);
 const MQTT_PORT = Number(process.env.MQTT_PORT) || 1883;
 // Tout sauf iot/role/+ : l'interface ne doit jamais connaître l'espion avant le résultat
 const TOPICS = ['iot/joueurs/+', 'iot/partie/etat', 'iot/partie/parole', 'iot/partie/verdict', 'iot/partie/resultat',
@@ -94,7 +97,7 @@ server.on('upgrade', (req, socket) => {
   const c = new Conn(socket); conns.add(c);
   c.send(JSON.stringify(spectacle.init()));
 });
-server.on('error', e => { console.error(`\n  Port ${PORT} indisponible (${e.code}). Essaie :  set PORT=4141 && node server.js\n`); process.exit(1); });
+server.on('error', e => { console.error(`\n  Port ${PORT} indisponible (${e.code}). Essaie :  node server.js --port 4141\n`); process.exit(1); });
 server.listen(PORT, '0.0.0.0', () => {
   console.log('\n  🕵  CLASSE NOIRE · L\'espion — interface spectateur lancée\n');
   console.log(`  Sur cet ordi :      http://localhost:${PORT}`);
@@ -103,7 +106,7 @@ server.listen(PORT, '0.0.0.0', () => {
     if (skip.test(name)) continue;
     for (const a of l || []) if (a.family === 'IPv4' && !a.internal) console.log(`  Depuis le réseau :  http://${a.address}:${PORT}   (${name})`);
   }
-  console.log(`\n  Broker MQTT : ${BROKERS.join(' ou ')}:${MQTT_PORT}   (autre broker : set MQTT_HOST=<ip>)`);
+  console.log(`\n  Broker MQTT : ${BROKERS.join(', puis ')} (port ${MQTT_PORT})   — autre broker : node server.js --broker <ip>`);
   console.log('  Ctrl+C pour arrêter.\n');
 
   const mqtt = createMqtt({

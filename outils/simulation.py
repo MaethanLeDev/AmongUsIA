@@ -1,8 +1,7 @@
 """Lance une partie complète sur un seul PC, sans Raspberry Pi : broker de test, faux Ollama, N joueurs et le maître.
 
-Pour regarder la partie dans l'interface, dans un autre terminal :
-    cd interface && set MQTT_HOST=localhost && node server.js      (Windows)
-    cd interface && MQTT_HOST=localhost node server.js             (Linux, macOS)
+Pour regarder la partie dans l'interface, dans un autre terminal : node interface/server.js
+puis ouvrir http://localhost:5050. Mode d'emploi complet : docs/mode-emploi.md
 
 Usage :
     uv run outils/simulation.py                          5 joueurs, tout est simulé
@@ -18,6 +17,8 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+
+import requests
 
 RACINE = Path(__file__).resolve().parent.parent
 
@@ -48,6 +49,21 @@ def lancer(commande, journal=None):
                             stdout=sortie, stderr=subprocess.STDOUT if sortie else None)
 
 
+def verifier_ollama(url, modele):
+    """Sans Ollama, toutes les IA diraient leur phrase de secours : mieux vaut s'arrêter tout de suite et expliquer."""
+    try:
+        reponse = requests.get(f"{url}/api/tags", timeout=5)
+        reponse.raise_for_status()
+        installes = [m.get("name", "") for m in reponse.json().get("models", [])]
+    except (requests.RequestException, ValueError) as erreur:
+        sys.exit(f"Ollama ne répond pas sur {url} ({erreur.__class__.__name__}).\n"
+                 "Installez-le (https://ollama.com/download), lancez-le, puis vérifiez : curl " + url + "/api/tags")
+    if modele not in installes and f"{modele}:latest" not in installes:
+        sys.exit(f"Le modèle {modele} n'est pas installé dans Ollama : ollama pull {modele}\n"
+                 f"Modèles installés : {', '.join(installes) or 'aucun'}")
+    print(f"Ollama prêt sur {url}, modèle {modele}.")
+
+
 def main():
     sys.stdout.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)  # console Windows : pas de plantage sur un emoji
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
@@ -62,6 +78,8 @@ def main():
     args, pour_le_maitre = parser.parse_known_args()
     pour_le_maitre = [a for a in pour_le_maitre if a != "--"]
     n = max(2, min(args.joueurs, len(PERSONNAGES)))
+    if args.ollama:
+        verifier_ollama(args.ollama.rstrip("/"), args.modele)
 
     dossier = Path(tempfile.mkdtemp(prefix="amongusia-"))
     processus = []
@@ -82,7 +100,7 @@ def main():
             config = {
                 "id": f"sim{i + 1}", "ville": ville, "coordonnees": [lat, lon],
                 "broker": {"hote": args.broker or "localhost", "port": 1883},
-                "ollama": {"url": args.ollama or "http://127.0.0.1:11435", "modele": args.modele if args.ollama else "faux"},
+                "ollama": {"url": args.ollama or "http://127.0.0.1:11435", "modele": args.modele if args.ollama else "simulé"},
                 "personnalite": personnalite, "strategie": "llm" if i % 4 else "ecart",
                 "memoire": "resume" if args.resume else "faits",
                 "interface": {"nom": nom, "arch": arch}, "api": {"port": 5100 + i},

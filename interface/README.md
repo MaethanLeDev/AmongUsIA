@@ -4,10 +4,9 @@ Elle reprend le jeu **Classe Noire** de Valérian : sa salle, sa table ronde sou
 Ici, ce sont les IA des Raspberry Pi qui sont assises à la table, et les spectateurs regardent la partie.
 
 ```bash
-cd interface
-node server.js                        # broker amongus.local, sinon 10.109.150.215 ; port 5050
-set MQTT_HOST=10.109.150.215          # (Windows) autre broker — Linux/macOS : MQTT_HOST=... node server.js
-set PORT=8080                         # autre port
+node interface/server.js                            # port 5050 ; broker localhost, sinon amongus.local, sinon 10.109.150.215
+node interface/server.js --broker 10.109.150.215    # forcer un broker
+node interface/server.js --port 8080                # autre port
 ```
 
 Il faut Node.js 18 ou plus, sans `npm install` : aucune dépendance. Les spectateurs ouvrent l'adresse « Depuis le réseau » affichée dans la console.

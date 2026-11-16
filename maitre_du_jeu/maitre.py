@@ -21,6 +21,7 @@ import paho.mqtt.client as mqtt
 DUREE_ECHANGE = 5   # secondes entre deux températures, fixé par le sujet
 MAX_JOUEURS = 12    # nombre de sièges autour de la table de l'interface
 STATS_PAR_DEFAUT = Path(__file__).with_name("stats.json")
+VAINQUEURS = {"capteurs": "les INNOCENTS", "espion": "l'ESPION"}  # "capteurs" dans le protocole (vocabulaire du sujet)
 
 
 class FinDePartie(Exception):
@@ -361,13 +362,16 @@ class MaitreDuJeu:
 
         print("\n=== RÉSULTAT ===")
         print(f"  L'espion était {self.nom(self.espion)}. "
-              + (f"Victoire : {gagnant.upper()} ({raison})." if gagnant else f"Partie annulée ({raison})."))
+              + (f"Victoire : {VAINQUEURS[gagnant]} ({raison})." if gagnant else f"Partie annulée ({raison})."))
         v = self.stats["votes"]
         print(f"  Votes justes depuis le début — LLM : {pourcentage(v['llm'])}, calcul : {pourcentage(v['calcul'])}")
 
     def compter_votes(self, votes):
-        """Extension du TP : le LLM vote-t-il mieux que la méthode de calcul ?"""
+        """Extension du TP : le LLM vote-t-il mieux que la méthode de calcul ?
+        Seuls les innocents comptent : l'espion ne vote jamais contre lui-même, son vote serait toujours « faux »."""
         for vote in votes:
+            if vote.get("votant") == self.espion:
+                continue
             if vote.get("strategie") == "llm":
                 self.stats["votes"]["llm"]["total"] += 1
                 self.stats["votes"]["llm"]["justes"] += vote["suspect"] == self.espion
@@ -441,7 +445,7 @@ def main():
     sys.stdout.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)  # console Windows : pas de plantage sur un emoji
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(description="Maître du jeu de l'espion")
-    parser.add_argument("--broker", default="amongus.local,10.109.150.215",
+    parser.add_argument("--broker", default="localhost,amongus.local,10.109.150.215",
                         help="adresse du broker MQTT (plusieurs, séparées par des virgules, essayées dans l'ordre)")
     parser.add_argument("--port", type=int, default=1883)
     parser.add_argument("--min-joueurs", type=int, default=3)

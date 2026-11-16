@@ -10,7 +10,7 @@ function remLen(n) { const out = []; do { let d = n % 128; n = Math.floor(n / 12
 const packet = (first, body) => Buffer.concat([Buffer.from([first]), remLen(body.length), body]);
 
 module.exports = function createMqtt({ hosts, port = 1883, clientId = 'classe-noire', keepAlive = 30, onMessage, onState, log = () => {} }) {
-  let sock = null, buf = Buffer.alloc(0), ok = false, pid = 1, timer = null, ping = null, stopped = false, errs = 0, h = 0;
+  let sock = null, buf = Buffer.alloc(0), ok = false, pid = 1, timer = null, ping = null, stopped = false, h = 0, erreur = '', echecs = [], cycles = 0;
   const subs = new Set();
   const host = () => hosts[h % hosts.length];
 
@@ -27,12 +27,17 @@ module.exports = function createMqtt({ hosts, port = 1883, clientId = 'classe-no
       send(packet(0x10, Buffer.concat([str('MQTT'), Buffer.from([4, 2, keepAlive >> 8, keepAlive & 255]), str(clientId)])));
     });
     sock.on('data', d => { buf = Buffer.concat([buf, d]); parse(); });
-    sock.on('error', e => { if (errs++ % (10 * hosts.length) < hosts.length) log(`MQTT ${host()}:${port} : ${e.code || e.message} (nouvel essai dans 3 s)`); });   // pas de spam si le broker est injoignable
+    sock.on('error', e => { erreur = e.code || e.message; });
     sock.on('close', () => {
       const was = ok; ok = false; clearInterval(ping); buf = Buffer.alloc(0);
       if (was && onState) onState(false, host());
-      if (!was) h++;                                         // cet hôte ne répond pas : on essaie le suivant
-      if (!stopped) timer = setTimeout(connect, 3000);      // reconnexion automatique
+      let delai = 3000;                                     // reconnexion automatique
+      if (!was) {                                           // cet hôte ne répond pas : on essaie le suivant tout de suite
+        echecs.push(`${host()} : ${erreur || 'fermé'}`); h++;
+        if (h % hosts.length) delai = 200;
+        else { if (cycles++ % 10 === 0) log(`MQTT : aucun broker ne répond (${echecs.join(', ')}), nouvel essai toutes les 3 s`); echecs = []; }   // pas de spam
+      }
+      if (!stopped) timer = setTimeout(connect, delai);
     });
   }
 
@@ -46,7 +51,7 @@ module.exports = function createMqtt({ hosts, port = 1883, clientId = 'classe-no
       buf = buf.subarray(i + len);
       if (type === 2) {                                           // CONNACK
         if (body[1] !== 0) { log(`MQTT : connexion refusée (code ${body[1]})`); sock.destroy(); return; }
-        ok = true; errs = 0; sock.setTimeout(0); if (onState) onState(true, host());
+        ok = true; echecs = []; cycles = 0; sock.setTimeout(0); if (onState) onState(true, host());
         for (const t of subs) { send(subscribePacket(t)); pid = (pid % 65534) + 1; }
         clearInterval(ping); ping = setInterval(() => send(Buffer.from([0xc0, 0])), keepAlive * 500);
       } else if (type === 3) {                                    // PUBLISH

@@ -7,6 +7,7 @@ const ID_RE = /^[^\s/#+]{1,32}$/;
 const HEX_RE = /^#[0-9a-fA-F]{6}$/;
 const CHAT_MAX = 120;
 const EN_JEU = ['mesures', 'debat', 'vote', 'verdict'];
+const ETATS_LLM = ['ok', 'injoignable', 'modele_absent', 'trop_lent', 'erreur'];
 
 const texte = (s, n) => String(s ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, n);
 const archParDefaut = id => ARCHS[[...id].reduce((a, c) => a + c.charCodeAt(0), 0) % ARCHS.length];
@@ -78,6 +79,7 @@ module.exports = function createSpectacle({ diffuser, log = () => {} }) {
     Object.assign(j, {
       nom: texte(p.nom, 16) || id, arch: ARCHS.includes(p.arch) ? p.arch : archParDefaut(id), couleurs: couleurs(p.couleurs),
       ville: texte(p.ville, 30), modele: texte(p.modele, 40), strategie: texte(p.strategie, 12), en_ligne: true,
+      llm: ETATS_LLM.includes(p.llm) ? p.llm : '',
     });
     attribuerSiege(j);
     if (arrive) { log(`+ ${id} (siège ${j.siege})`); if (!retenu) evenement('arrivee', { id }); }
