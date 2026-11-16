@@ -1,7 +1,7 @@
-"""Joueur générique : un capteur de température piloté par une IA Ollama.
+"""Joueur générique : un capteur de température piloté par une IA (Ollama, ou Gemini avec une clé API).
 
 Le même script tourne sur toutes les machines. Tout ce qui se personnalise est dans config.json :
-ville, modèle Ollama, personnalité, mémoire, nom et apparence dans l'interface.
+ville, modèle Ollama ou Gemini, personnalité, mémoire, nom et apparence dans l'interface.
 Il expose aussi l'API HTTP de l'agent du TP « RPi & Ollama » (voir api.py).
 
 Usage : uv run joueur/joueur.py [chemin/vers/config.json]
@@ -93,13 +93,13 @@ class Joueur:
     # --- Réception MQTT -------------------------------------------------
 
     def _on_connect(self, client, userdata, flags, reason_code, properties):
-        self.log(f"connecté au broker ({reason_code}), modèle {self.ia.modele}, stratégie {self.ia.strategie}")
+        self.log(f"connecté au broker ({reason_code}), modèle {self.ia.modele_actif}, stratégie {self.ia.strategie}")
         client.subscribe(self.abonnements)
         self.annoncer_presence()
 
     def annoncer_presence(self):
         presence = {"id": self.id, "ville": self.config["ville"], "en_ligne": True,
-                    "modele": self.ia.modele, "strategie": self.ia.strategie}
+                    "modele": self.ia.modele_actif, "strategie": self.ia.strategie}
         presence.update(self.config.get("interface", {}))  # nom, arch, couleurs
         if self.url_api:
             presence["api"] = self.url_api
@@ -112,7 +112,7 @@ class Joueur:
         if alerte:
             self.log(f"⚠ {alerte}. En attendant, cette IA passera son tour au débat et votera par calcul.")
         else:
-            self.log(f"Ollama prêt, modèle {self.ia.modele}")
+            self.log(f"{self.ia.fournisseur} prêt, modèle {self.ia.modele_actif}")
 
     def _llm_change(self, etat):
         """Le LLM répond de nouveau, ou plus : on le dit à tout le monde (l'interface l'affiche)."""
@@ -327,7 +327,7 @@ class Joueur:
             etat, partie = self.etat.get("etat"), self.partie
             vivant = partie is not None and self.id in partie.vivants
         return {
-            "id": self.id, "nom": self.ia.nom, "modele": self.ia.modele, "personnalite": self.ia.personnalite,
+            "id": self.id, "nom": self.ia.nom, "modele": self.ia.modele_actif, "personnalite": self.ia.personnalite,
             "ville": self.config["ville"], "strategie": self.ia.strategie,
             "capacites": ["discuter en se souvenant de la conversation (POST /message)",
                           "lancer une conversation avec un autre agent (POST /discuter)",
@@ -392,6 +392,9 @@ def lire_config(chemin):
         erreurs.append('"strategie" : "llm" ou "ecart"')
     if config.get("memoire", "faits") not in ("faits", "resume"):
         erreurs.append('"memoire" : "faits" ou "resume"')
+    gemini = config.get("gemini", {})
+    if not isinstance(gemini, dict) or not all(isinstance(gemini.get(c, ""), str) for c in ("cle_api", "modele")):
+        erreurs.append('"gemini" : {"cle_api": "ta clé", "modele": "gemini-3.8-flash"} (cle_api vide : Gemini désactivé)')
     if erreurs:
         sys.exit(f"{chemin} à corriger :\n  - " + "\n  - ".join(erreurs))
     config.setdefault("ollama", {})
