@@ -1,7 +1,7 @@
 """serveur.py : le côté serveur en une commande. On vérifie le choix du broker, sans Docker ni réseau."""
 import sys
-from types import SimpleNamespace
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
