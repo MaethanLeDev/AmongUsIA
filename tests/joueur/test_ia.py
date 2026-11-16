@@ -306,6 +306,91 @@ def test_vote_ollama_injoignable_repli_sur_le_calcul(cerveau, partie_type, llm_r
     assert cerveau.voter(partie_type, delai=30)[0] == "rpi3"
 
 
+def test_vote_honnete_par_calcul_sans_appeler_le_llm(config_joueur, partie_type, monkeypatch):
+    config_joueur["vote_honnete"] = "calcul"
+    cerveau = ia.IA(config_joueur)
+    monkeypatch.setattr(cerveau, "discuter", lambda *a, **k: pytest.fail("le LLM ne doit pas être appelé"))
+
+    suspect, _, calcul = cerveau.voter(partie_type, delai=30)
+
+    assert suspect == calcul == "rpi3"
+
+
+def test_vote_espion_par_le_llm_meme_avec_vote_honnete_par_calcul(config_joueur, partie_type, monkeypatch):
+    config_joueur["vote_honnete"] = "calcul"
+    partie_type.role = "espion"
+    cerveau = ia.IA(config_joueur)
+    appels = []
+    monkeypatch.setattr(cerveau, "discuter", lambda messages, *a, **k: appels.append(messages) or '{"suspect": "rpi2", "raison": "Mimi."}')
+
+    suspect, _, calcul = cerveau.voter(partie_type, delai=30)
+
+    assert (suspect, calcul) == ("rpi2", "rpi3")
+    assert "Tu es l'espion : vote pour l'innocent" in appels[0][-1]["content"]
+    assert "Identifiants possibles : rpi2 (Mimi), rpi3 (Kaito), rpi4 (Yuki)." in appels[0][-1]["content"]
+
+
+# --- Mode météo historique ----------------------------------------------------
+
+
+@pytest.fixture
+def partie_climat(partie_type):
+    """La partie_type, mais les capteurs annoncent le mois de chaque mesure (rpi3 : mesure sans mois, rpi4 : aucune)."""
+    manche = partie_type.manche()
+    manche.mesures = {"rpi1": [12.0, 3.0], "rpi2": [24.0, -3.0], "rpi3": [20.0], "rpi4": []}
+    manche.mois = {"rpi1": [6, 11], "rpi2": [7, 1], "rpi3": [None]}
+    return partie_type
+
+
+def test_partie_sans_mois_n_est_pas_en_mode_climat(partie_type):
+    assert partie_type.climat() is False
+
+
+def test_partie_dont_les_capteurs_annoncent_un_mois_est_en_mode_climat(partie_climat):
+    assert partie_climat.climat() is True
+
+
+def test_tableau_climat_affiche_les_mois_sans_verdict_de_stabilite(partie_climat):
+    tableau = ia.tableau_mesures(partie_climat)
+
+    assert "- Mimi, Seynod : juil. 24.0 °C ; janv. -3.0 °C" in tableau
+    assert "- Sherlock (toi), Annecy : juin 12.0 °C ; nov. 3.0 °C" in tableau
+    assert "- Kaito, Poisy : ? 20.0 °C" in tableau
+    assert "- Yuki : aucune mesure" in tableau
+    assert "STABLE" not in tableau
+
+
+def test_consigne_du_capteur_honnete_parle_de_climat_en_mode_climat(cerveau, partie_climat, llm_repond):
+    appels = llm_repond("Ok.")
+
+    cerveau.parler(partie_climat, 1, 2, delai=30)
+
+    systeme = appels[0]["messages"][0]["content"]
+    assert "VRAIE température de sa ville" in systeme
+    assert "garde le même écart" not in systeme   # la règle du mode normal serait fausse ici
+
+
+def test_consigne_de_l_espion_en_mode_climat(config_joueur, partie_climat, monkeypatch):
+    partie_climat.role = "espion"
+    cerveau = ia.IA(config_joueur)
+    appels = []
+    monkeypatch.setattr(cerveau, "discuter", lambda messages, *a, **k: appels.append(messages) or "Ok.")
+
+    cerveau.parler(partie_climat, 1, 2, delai=30)
+
+    assert "calculées d'après la moyenne des autres" in appels[0][0]["content"]
+
+
+def test_vote_honnete_par_calcul_est_ignore_en_mode_climat(config_joueur, partie_climat, monkeypatch):
+    config_joueur["vote_honnete"] = "calcul"
+    cerveau = ia.IA(config_joueur)
+    appels = []
+    monkeypatch.setattr(cerveau, "discuter", lambda messages, *a, **k: appels.append(messages) or '{"suspect": "rpi2", "raison": "Mimi."}')
+
+    assert cerveau.voter(partie_climat, delai=30)[0] == "rpi2"
+    assert len(appels) == 1   # le calcul ne trouve plus rien quand tout le monde varie : le LLM juge le climat
+
+
 # --- Prise de parole ----------------------------------------------------------
 
 

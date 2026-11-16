@@ -92,6 +92,8 @@ Le premier lancement l'écrit tout seul ; on peut ensuite l'adapter (ou partir d
 | `ollama.modele` | tout modèle installé (`ollama list`)                                            | le cerveau de l'IA                                |
 | `personnalite`  | une ou deux phrases « Tu es… »                                                  | sa façon de débattre                              |
 | `strategie`     | `llm` (défaut) ou `ecart`                                                       | vote par le LLM, ou par le calcul seul            |
+| `meteo`         | `reelle` (défaut) ou `historique`                                               | `historique` : chaque mesure est un jour et une heure au hasard des 3 dernières années, mois annoncé. **À régler pareil sur tous les Pi** |
+| `vote_honnete`  | `llm` (défaut) ou `calcul`                                                      | `calcul` : honnête, on vote par le calcul ; le LLM ne sert qu'à l'espion (sauf en mode `historique`) |
 | `memoire`       | `faits` (défaut) ou `resume`                                                    | `resume` : le LLM écrit en plus ses notes à chaque manche |
 | `interface.nom` | 16 caractères max                                                               | nom affiché à la table                            |
 | `interface.arch`| `stratege`, `vengeur`, `sourire`, `reine`, `ombre`, `prodige`                   | apparence du personnage                           |

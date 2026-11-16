@@ -3,11 +3,14 @@
 Les tests ne lisent pas ses attributs internes. Ce qu'il a retenu des autres se voit dans le champ « calcul »
 de son vote (la méthode sans LLM) ou dans le contexte qu'il envoie au LLM.
 """
+import itertools
 import json
 import random
+from types import SimpleNamespace
 
 import pytest
-from aides import ID_PARTIE, FauxClientMQTT, FauxMessage
+import requests
+from aides import ID_PARTIE, FausseReponseHTTP, FauxClientMQTT, FauxMessage
 
 import joueur
 
@@ -487,6 +490,124 @@ def test_espion_sans_aucune_donnee_ne_publie_rien(en_partie, annoncer_phase, met
     annoncer_phase("mesures")
 
     assert temperatures(j) == []
+
+
+# --- Météo historique : une mesure au hasard dans les trois dernières années ----
+
+
+@pytest.fixture
+def archives(monkeypatch, meteo_service):
+    """Open-Meteo avec ses archives. .heures = [("2022-01-03T08:00", -2.5), …] ; .indisponibles = True : elles échouent."""
+    service = SimpleNamespace(heures=[("2022-01-03T08:00", -2.5)], indisponibles=False, appels=0)
+    sans_archives = requests.get   # le faux Open-Meteo du conftest : température actuelle
+
+    def get(url, params=None, timeout=None):
+        if "archive" not in url:
+            return sans_archives(url, params=params, timeout=timeout)
+        service.appels += 1
+        if service.indisponibles:
+            raise requests.ConnectionError("pas d'Internet")
+        return FausseReponseHTTP({"hourly": {"time": [h for h, _ in service.heures],
+                                             "temperature_2m": [v for _, v in service.heures]}})
+
+    monkeypatch.setattr(requests, "get", get)
+    return service
+
+
+HISTORIQUE = pytest.mark.parametrize("config_joueur", [{"meteo": "historique"}], indirect=True)
+
+
+@HISTORIQUE
+def test_honnete_publie_une_mesure_des_archives_avec_son_mois(en_partie, annoncer_phase, archives):
+    j = en_partie("normal")
+
+    annoncer_phase("mesures")
+
+    assert [(m["temperature"], m["mois"]) for m in temperatures(j)] == [(-2.5, 1)] * 5
+
+
+@HISTORIQUE
+def test_honnete_tire_une_mesure_differente_a_chaque_echange(en_partie, annoncer_phase, archives, monkeypatch):
+    archives.heures = [(f"2022-{mois:02d}-10T12:00", mois * 2.0) for mois in range(1, 13)]
+    tirage = itertools.count()
+    monkeypatch.setattr(random, "choice", lambda sequence: sequence[next(tirage) * 5 % len(sequence)])   # 12 mois, un tirage tous les 5
+    j = en_partie("normal")
+
+    annoncer_phase("mesures")
+
+    assert [m["mois"] for m in temperatures(j)] == [1, 6, 11, 4, 9]   # un mois différent à chaque échange
+    assert all(m["temperature"] == m["mois"] * 2.0 for m in temperatures(j))   # le mois est celui de la valeur
+
+
+@HISTORIQUE
+def test_espion_annonce_le_mois_dont_le_climat_est_le_plus_proche(en_partie, annoncer_phase, archives, tirages):
+    archives.heures = [("2022-01-03T08:00", -2.5), ("2022-07-14T15:00", 25.0)]
+    j = en_partie("espion")
+    tirages(ecart=0.10, sens=1)
+    publier_mesures(j, {"rpi2": [24.0]})   # sa fausse valeur : 26,4 °C, bien plus proche de juillet que de janvier
+
+    annoncer_phase("mesures")
+
+    assert {m["mois"] for m in temperatures(j)} == {7}
+    assert temperatures(j)[0]["temperature"] == 26.4
+
+
+@HISTORIQUE
+def test_sans_archives_un_honnete_publie_la_temperature_actuelle_sans_mois(en_partie, annoncer_phase, archives):
+    archives.indisponibles = True
+    j = en_partie("normal")
+
+    annoncer_phase("mesures")
+
+    assert [m["temperature"] for m in temperatures(j)] == [12.3] * 5
+    assert all("mois" not in m for m in temperatures(j))
+
+
+def test_meteo_reelle_ne_publie_pas_de_mois(en_partie, annoncer_phase, archives):
+    j = en_partie("normal")
+
+    annoncer_phase("mesures")
+
+    assert all("mois" not in m for m in temperatures(j))
+    assert archives.appels == 0   # et ne charge pas les archives : pas de requête inutile
+
+
+@HISTORIQUE
+def test_les_mois_annonces_par_les_autres_arrivent_dans_le_contexte_du_llm(en_partie, annoncer_phase, llm):
+    j = en_partie("normal")
+    for echange, (mois, valeur) in enumerate([(7, 24.0), (1, -3.0)], start=1):
+        topic, contenu = mesure("rpi2", valeur, echange)
+        j.client.injecter(topic, {**contenu, "mois": mois})
+
+    annoncer_phase("vote")
+
+    contexte = llm.prompts()[-1]
+    assert "juil. 24.0 °C ; janv. -3.0 °C" in contexte
+    assert "INSTABLE" not in contexte
+    assert "VRAIE température de sa ville" in llm.requetes[-1]["json"]["messages"][0]["content"]
+
+
+@pytest.mark.parametrize("config_joueur", [{"meteo": "historique", "vote_honnete": "calcul"}], indirect=True)
+def test_en_mode_historique_l_honnete_vote_par_le_llm_meme_avec_vote_honnete_calcul(en_partie, annoncer_phase, llm):
+    j = en_partie("normal")
+    topic, contenu = mesure("rpi2", 24.0)
+    j.client.injecter(topic, {**contenu, "mois": 7})
+
+    annoncer_phase("vote")
+
+    assert llm.requetes   # sans mode historique, vote_honnete "calcul" n'appellerait pas le LLM
+    assert votes(j)[-1]["suspect"] == "rpi3"   # la réponse du faux LLM
+
+
+def test_un_mois_invalide_est_ignore(en_partie, annoncer_phase, llm):
+    j = en_partie("normal")
+    topic, contenu = mesure("rpi2", 12.0)
+    j.client.injecter(topic, {**contenu, "mois": 13})
+
+    annoncer_phase("vote")
+
+    assert "janv." not in llm.prompts()[-1]
+    assert "STABLE" in llm.prompts()[-1]   # le tableau habituel, pas celui du mode historique
 
 
 # --- Vote, parole, mémoire ----------------------------------------------------

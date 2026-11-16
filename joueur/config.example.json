@@ -9,8 +9,14 @@
     "url": "http://127.0.0.1:11434",
     "modele": "qwen3:0.6b"
   },
+  "gemini": {
+    "cle_api": "",
+    "modele": "gemini-3.8-flash"
+  },
   "personnalite": "Tu es un détective froid et méthodique. Tu cites toujours les chiffres et tu poses des questions pièges.",
+  "meteo": "reelle",
   "strategie": "llm",
+  "vote_honnete": "llm",
   "memoire": "faits",
   "interface": {
     "nom": "Sherlock",
