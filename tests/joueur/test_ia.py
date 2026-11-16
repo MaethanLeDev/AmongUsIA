@@ -1,4 +1,8 @@
-"""Le cerveau du joueur (ia.py) : stratégie « ecart », lecture des réponses du LLM, requêtes Ollama, mémoire."""
+"""Le cerveau du joueur (ia.py) : stratégie « ecart », lecture des réponses du LLM, requêtes Ollama ou Claude, mémoire."""
+from types import SimpleNamespace
+
+import anthropic
+import httpx2
 import pytest
 import requests
 from aides import ID_PARTIE, FausseReponseHTTP
@@ -246,6 +250,178 @@ def test_ollama_injoignable(cerveau, monkeypatch):
     monkeypatch.setattr(ia.requests, "get", get)
 
     assert cerveau.disponible() is False
+
+
+# --- Requête à Claude (fournisseur « anthropic ») -----------------------------
+
+
+class FauxClaude:
+    """Remplace le client Anthropic : garde chaque appel à messages.create (avec le délai demandé) et rend .reponse."""
+
+    def __init__(self):
+        self.appels = []
+        self.reponse = SimpleNamespace(stop_reason="end_turn", content=[SimpleNamespace(type="text", text="Bonjour.")])
+        self.erreur = None
+        self.messages = self
+        self._delai = None
+
+    def with_options(self, timeout):
+        self._delai = timeout
+        return self
+
+    def create(self, **corps):
+        self.appels.append({**corps, "delai": self._delai})
+        if self.erreur:
+            raise self.erreur
+        return self.reponse
+
+
+def requete_anthropic():
+    return httpx2.Request("POST", "https://api.anthropic.com/v1/messages")
+
+
+@pytest.fixture
+def claude(config_joueur, monkeypatch):
+    """Un joueur configuré pour Claude, avec une clé de test et un faux client : aucun appel réel, aucun frais."""
+    config_joueur["fournisseur"] = "anthropic"
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+    cerveau = ia.IA(config_joueur)
+    cerveau._client_claude = FauxClaude()
+    return cerveau
+
+
+def test_claude_modele_par_defaut_et_reglages_du_config(config_joueur):
+    config_joueur.update({"fournisseur": "anthropic", "anthropic": {"modele": "claude-sonnet-5-5", "effort": "medium"}})
+
+    cerveau = ia.IA(config_joueur)
+
+    assert (cerveau.modele_claude, cerveau.effort_claude) == ("claude-sonnet-5-5", "medium")
+    assert ia.IA({**config_joueur, "anthropic": {}}).modele_claude == ia.CLAUDE_MODELE
+
+
+def test_claude_parle_en_premier_quand_la_cle_est_la(claude):
+    assert claude.fournisseur == "Claude"
+    assert claude.modele_actif == ia.CLAUDE_MODELE
+
+
+def test_claude_sans_cle_ollama_reste_le_fournisseur(claude, monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
+
+    assert (claude.fournisseur, claude.modele_actif) == ("Ollama", "qwen3:0.6b")
+
+
+def test_sans_fournisseur_anthropic_la_cle_est_ignoree(config_joueur, monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+
+    assert ia.IA(config_joueur).fournisseur == "Ollama"
+
+
+def test_requete_claude_separe_le_prompt_systeme_des_echanges(claude):
+    messages = [{"role": "system", "content": "Tu es Léa."}, {"role": "user", "content": "Salut"}]
+
+    claude.discuter(messages, delai=30, max_tokens=50)
+
+    appel = claude._client_claude.appels[0]
+    assert appel["system"] == "Tu es Léa."
+    assert appel["messages"] == [{"role": "user", "content": "Salut"}]
+    assert (appel["model"], appel["output_config"], appel["delai"]) == (ia.CLAUDE_MODELE, {"effort": "low"}, 30)
+
+
+def test_requete_claude_plafonne_son_delai_pour_laisser_la_main_a_ollama(claude):
+    claude.discuter([{"role": "user", "content": "Parle"}], delai=120, max_tokens=50)
+
+    assert claude._client_claude.appels[0]["delai"] == ia.DELAI_CLAUDE
+
+
+def test_requete_claude_sans_temperature_ni_format(claude):
+    claude.discuter([{"role": "user", "content": "Vote"}], delai=30, max_tokens=50, json_attendu=True, temperature=1.1)
+
+    appel = claude._client_claude.appels[0]
+    assert "temperature" not in appel
+    assert "output_format" not in appel
+
+
+def test_requete_claude_laisse_de_la_place_a_sa_reflexion(claude):
+    claude.discuter([{"role": "user", "content": "Parle"}], delai=30, max_tokens=120)
+
+    assert claude._client_claude.appels[0]["max_tokens"] == ia.CLAUDE_MIN_TOKENS
+
+
+def test_requete_claude_garde_une_grande_limite_demandee(claude):
+    claude.discuter([{"role": "user", "content": "Parle"}], delai=30, max_tokens=5000)
+
+    assert claude._client_claude.appels[0]["max_tokens"] == 5000
+
+
+def test_claude_ne_renvoie_que_le_texte_pas_la_reflexion(claude):
+    claude._client_claude.reponse = SimpleNamespace(stop_reason="end_turn", content=[
+        SimpleNamespace(type="thinking", thinking=""), SimpleNamespace(type="text", text="Kaito, "),
+        SimpleNamespace(type="text", text="explique-toi.")])
+
+    assert claude.discuter([{"role": "user", "content": "Parle"}], delai=30, max_tokens=50) == "Kaito, explique-toi."
+
+
+def test_claude_refus_leve_une_erreur_reseau(claude):
+    claude._client_claude.reponse = SimpleNamespace(stop_reason="refusal", content=[])
+
+    with pytest.raises(requests.RequestException):
+        claude._discuter_claude([{"role": "user", "content": "Parle"}], delai=30, max_tokens=50)
+
+
+def test_claude_trop_lent_donne_une_requests_timeout(claude):
+    claude._client_claude.erreur = anthropic.APITimeoutError(request=requete_anthropic())
+
+    with pytest.raises(requests.Timeout):
+        claude._discuter_claude([{"role": "user", "content": "Parle"}], delai=30, max_tokens=50)
+    assert claude.etat_llm == "trop_lent"
+
+
+def test_claude_injoignable_donne_une_requests_connection_error(claude):
+    claude._client_claude.erreur = anthropic.APIConnectionError(request=requete_anthropic())
+
+    with pytest.raises(requests.ConnectionError):
+        claude._discuter_claude([{"role": "user", "content": "Parle"}], delai=30, max_tokens=50)
+    assert claude.etat_llm == "injoignable"
+
+
+def test_claude_cle_refusee_le_desactive_pour_la_suite(claude):
+    reponse = httpx2.Response(401, request=requete_anthropic())
+    claude._client_claude.erreur = anthropic.AuthenticationError("invalid x-api-key", response=reponse, body=None)
+
+    with pytest.raises(requests.RequestException):
+        claude._discuter_claude([{"role": "user", "content": "Parle"}], delai=30, max_tokens=50)
+
+    assert claude.fournisseur == "Ollama"
+
+
+def test_claude_en_panne_ollama_prend_le_relais(claude, monkeypatch):
+    claude._client_claude.erreur = anthropic.APIConnectionError(request=requete_anthropic())
+    monkeypatch.setattr(claude, "_ollama", lambda messages, delai, max_tokens, json_attendu, temperature: "Repli Ollama.")
+
+    assert claude.discuter([{"role": "user", "content": "Parle"}], delai=30, max_tokens=50) == "Repli Ollama."
+
+
+def test_claude_parle_et_vote_comme_avec_ollama(claude, partie_type):
+    claude._client_claude.reponse = SimpleNamespace(stop_reason="end_turn", content=[
+        SimpleNamespace(type="text", text='{"suspect": "rpi2", "raison": "Mimi est trop calme."}')])
+
+    assert claude.voter(partie_type, delai=30)[:2] == ("rpi2", "Mimi est trop calme.")
+
+
+def test_claude_sans_cle_la_verification_le_signale_sans_appeler_l_api(claude, monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
+
+    assert "ANTHROPIC_API_KEY" in claude._verifier_claude()
+    assert claude._client_claude.appels == []
+
+
+def test_claude_avec_cle_la_verification_passe_sans_appeler_l_api(claude):
+    assert claude.verifier() is None
+    assert claude.etat_llm == "ok"
+    assert claude.disponible() is True
+    assert claude._client_claude.appels == []
 
 
 # --- Vote ---------------------------------------------------------------------

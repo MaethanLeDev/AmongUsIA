@@ -90,6 +90,7 @@ Le premier lancement l'écrit tout seul ; on peut ensuite l'adapter (ou partir d
 | `ville`         | une ville **voisine** des autres (Annecy, Seynod, Sévrier…)                     | la température publiée                            |
 | `coordonnees`   | `[45.886, 6.089]`                                                               | remplace le géocodage de la ville                 |
 | `ollama.modele` | tout modèle installé (`ollama list`)                                            | le cerveau de l'IA                                |
+| `fournisseur`   | `ollama` (défaut) ou `anthropic`                                                | `anthropic` : Claude à la place d'Ollama (clé dans `ANTHROPIC_API_KEY`, réglages dans `anthropic`, voir [joueur/README.md](../joueur/README.md)) |
 | `personnalite`  | une ou deux phrases « Tu es… »                                                  | sa façon de débattre                              |
 | `strategie`     | `llm` (défaut) ou `ecart`                                                       | vote par le LLM, ou par le calcul seul            |
 | `meteo`         | `reelle` (défaut) ou `historique`                                               | `historique` : chaque mesure est un jour et une heure au hasard des 3 dernières années, mois annoncé. **À régler pareil sur tous les Pi** |

@@ -22,6 +22,8 @@ Seul Ollama lui-même s'installe à la main (`curl -fsSL https://ollama.com/inst
 | `coordonnees`  |             | `[latitude, longitude]` : évite le géocodage (ville homonyme, pas de DNS)                         |
 | `broker`       |             | `{"hote": "amongus.local,10.109.150.215", "port": 1883}` : les hôtes sont essayés dans l'ordre    |
 | `ollama`       |             | `{"url": "http://127.0.0.1:11434", "modele": "qwen3:0.6b"}`                                      |
+| `fournisseur`  |             | `"anthropic"` : l'IA parle avec Claude, et Ollama prend le relais si Claude échoue. La clé va dans la variable d'environnement `ANTHROPIC_API_KEY` du Pi (`export ANTHROPIC_API_KEY=sk-ant-...`), jamais dans `config.json`. Chaque appel est facturé. Claude passe avant Gemini si les deux sont configurés |
+| `anthropic`    |             | `{"modele": "claude-opus-5-5", "effort": "low"}` : lu seulement avec `"fournisseur": "anthropic"`. `effort` (`low`, `medium`, `high`) règle de combien Claude réfléchit : `low` tient les délais de parole |
 | `gemini`       |             | `{"cle_api": "ta clé", "modele": "gemini-3.8-flash"}` : l'IA parle avec Gemini au lieu d'Ollama. Clé vide ou bloc absent : Ollama seul. Voir « Gemini » plus bas |
 | `personnalite` |             | le caractère de l'IA, en une ou deux phrases (« Tu es… »)                                         |
 | `strategie`    |             | `llm` (le LLM vote, valeur par défaut) ou `ecart` (calcul seul, le jeu de base du TP)              |

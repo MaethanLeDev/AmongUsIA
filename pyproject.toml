@@ -8,6 +8,7 @@ authors = [
 ]
 requires-python = ">=3.14"  # installé par uv sur chaque machine (.python-version), sans toucher au Python du système
 dependencies = [
+    "anthropic>=2.8.0",
     "paho-mqtt>=2.1.0",
     "requests>=2.34.2",
 ]

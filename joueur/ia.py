@@ -5,6 +5,7 @@ Ollama reste le repli de Gemini : une panne ou un quota dépassé ne fait pas pe
 Tout ce qui se personnalise (modèle, personnalité, mémoire) vient de config.json.
 """
 import json
+import os
 import random
 import re
 import statistics
@@ -76,6 +77,8 @@ MOIS = ("janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sep
 GEMINI_URL ="https://generativelanguage.googleapis.com/v1beta/models/{modele}"  # + ":generateContent" pour générer
 GEMINI_MODELE = "gemini-3.8-flash"  # modèle par défaut quand config.json n'en donne pas (les anciens 2.5 sont dépréciés)
 DELAI_GEMINI = 30  # secondes : plus lent que ça, on passe à Ollama plutôt que de rater son tour de parole
+CLAUDE_MODELE = "claude-opus-5-5"  # modèle par défaut quand config.json n'en donne pas
+DELAI_CLAUDE = 60  # secondes : Claude réfléchit plus que Gemini, mais le délai de parole (90 s) doit laisser une chance à Ollama
 
 AGENT = """Tu es {nom}, un agent conversationnel qui tourne sur un Raspberry Pi avec le modèle {modele}.
 Ta personnalité : {personnalite}
@@ -93,6 +96,9 @@ SEUIL_STABLE = 0.5  # °C : l'écart d'un capteur honnête aux autres varie moin
 CITATION = 110      # caractères gardés de chaque réplique d'une manche passée
 # Un petit modèle se trahit (ou s'accuse à tort) facilement : on remplace ces phrases
 AVEU = re.compile(r"\bje suis\s+(l['’]\s*|un |le )?espion", re.IGNORECASE)
+# Claude réfléchit avant de répondre, et sa réflexion compte dans max_tokens : une limite de 120 jetons (réplique d'un
+# petit modèle) le couperait avant sa première phrase. La consigne « 1 à 3 phrases » garde ses réponses courtes.
+CLAUDE_MIN_TOKENS = 2000
 
 
 class Manche:
@@ -284,6 +290,14 @@ class IA:
         self.gemini_utilisable = True   # passe à False si Google refuse la clé ou ne connaît pas le modèle : inutile d'insister
         self.strategie = config.get("strategie", "llm")
         self.memoire = config.get("memoire", "faits")
+        # "fournisseur": "anthropic" : Claude parle en premier, Ollama prend le relais s'il échoue. La clé vient de
+        # ANTHROPIC_API_KEY, jamais de config.json. Il passe avant Gemini si les deux sont configurés.
+        self.utilise_claude = config.get("fournisseur") == "anthropic"
+        claude = config.get("anthropic") or {}
+        self.modele_claude = claude.get("modele") or CLAUDE_MODELE
+        self.effort_claude = claude.get("effort") or "low"   # low : le délai de parole est court, Claude pense peu mais assez
+        self.claude_utilisable = True   # passe à False si Anthropic refuse la clé ou ne connaît pas le modèle : inutile d'insister
+        self._client_claude = None
         self.vote_honnete = config.get("vote_honnete", "llm")   # "calcul" : honnête, on vote par le calcul même avec strategie "llm"
         # État du LLM, affiché par l'interface : ok, injoignable, modele_absent, trop_lent, erreur (None : pas encore testé)
         self.etat_llm = None
@@ -291,13 +305,15 @@ class IA:
 
     @property
     def fournisseur(self):
-        """Le LLM qui répond en premier : « Gemini » (clé configurée et acceptée), sinon « Ollama »."""
+        """Le LLM qui répond en premier : « Claude » ou « Gemini » (configurés et acceptés), sinon « Ollama »."""
+        if self.utilise_claude and self.claude_utilisable and self.cle_claude():
+            return "Claude"
         return "Gemini" if self.cle_gemini and self.gemini_utilisable else "Ollama"
 
     @property
     def modele_actif(self):
         """Le modèle de ce fournisseur, celui qu'on annonce aux autres joueurs."""
-        return self.modele_gemini if self.fournisseur == "Gemini" else self.modele
+        return {"Claude": self.modele_claude, "Gemini": self.modele_gemini}.get(self.fournisseur, self.modele)
 
     def _noter(self, etat):
         if etat != self.etat_llm:
@@ -307,14 +323,26 @@ class IA:
 
     def verifier(self):
         """Le LLM est-il prêt ? Renvoie None si tout va bien, sinon ce qu'il faut faire.
-        Avec une clé Gemini, une panne de Gemini n'est qu'un avertissement tant qu'Ollama peut prendre le relais."""
-        if self.cle_gemini:
+        Avec une clé Claude ou Gemini, une panne de ce fournisseur n'est qu'un avertissement tant qu'Ollama peut prendre le relais."""
+        if self.utilise_claude:
+            alerte = self._verifier_claude()
+            if alerte is None:
+                self._noter("ok")
+                return None
+            print(f"  ⚠ {alerte}")
+        elif self.cle_gemini:
             alerte = self._verifier_gemini()
             if alerte is None:
                 self._noter("ok")
                 return None
             print(f"  ⚠ {alerte}")
         return self._verifier_ollama()
+
+    def _verifier_claude(self):
+        """Une clé est-elle configurée ? On n'appelle pas l'API : chaque requête est facturée."""
+        if not self.cle_claude():
+            return "aucune clé Claude : export ANTHROPIC_API_KEY=sk-ant-... avant de lancer le joueur, Ollama prendra le relais"
+        return None
 
     def _verifier_gemini(self):
         """Google accepte-t-il la clé, et connaît-il le modèle ? (models.get : ne consomme pas de quota de génération.)"""
@@ -349,9 +377,16 @@ class IA:
         return None
 
     def discuter(self, messages, delai, max_tokens, json_attendu=False, temperature=0.8):
-        """Un appel au LLM : Gemini si une clé est configurée, avec Ollama en repli s'il échoue ; sinon Ollama seul.
+        """Un appel au LLM : Claude ou Gemini si une clé est configurée, avec Ollama en repli s'il échoue ; sinon Ollama seul.
         Lève requests.RequestException si aucun des deux ne répond."""
-        if self.fournisseur == "Gemini":
+        if self.fournisseur == "Claude":
+            debut = time.monotonic()
+            try:
+                return self._discuter_claude(messages, min(delai, DELAI_CLAUDE), max_tokens)
+            except requests.RequestException as erreur:
+                print(f"  Claude indisponible ({erreur}), on passe à Ollama")
+                delai = max(5, delai - (time.monotonic() - debut))   # Ollama n'a droit qu'au temps qu'il reste
+        elif self.fournisseur == "Gemini":
             debut = time.monotonic()
             try:
                 return self._gemini(messages, min(delai, DELAI_GEMINI), max_tokens, json_attendu, temperature)
@@ -425,7 +460,52 @@ class IA:
         self._noter("ok")
         return contenu
 
+    def cle_claude(self):
+        return os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN")
+
+    def _discuter_claude(self, messages, delai, max_tokens):
+        """Un appel à l'API Anthropic, avec la même interface que discuter() : renvoie le texte de la réponse.
+        Les erreurs de l'API deviennent des requests.RequestException, comme pour Ollama, pour garder les mêmes replis.
+        Pas de température ni de format JSON : Claude 5.5 refuse la première, et le vote lit déjà un texte libre."""
+        import anthropic   # seulement ici : un joueur Ollama n'en a pas besoin
+
+        if self._client_claude is None:
+            self._client_claude = anthropic.Anthropic(max_retries=1)
+        systeme = "\n\n".join(m["content"] for m in messages if m["role"] == "system")
+        echanges = [m for m in messages if m["role"] != "system"]
+        try:
+            reponse = self._client_claude.with_options(timeout=delai).messages.create(
+                model=self.modele_claude,
+                max_tokens=max(max_tokens, CLAUDE_MIN_TOKENS),
+                system=systeme,
+                messages=echanges,
+                output_config={"effort": self.effort_claude},
+            )
+        except anthropic.APITimeoutError as erreur:   # avant APIConnectionError, dont il hérite
+            self._noter("trop_lent")
+            raise requests.Timeout(str(erreur)) from erreur
+        except anthropic.APIConnectionError as erreur:
+            self._noter("injoignable")
+            raise requests.ConnectionError(str(erreur)) from erreur
+        except anthropic.NotFoundError as erreur:
+            self.claude_utilisable = False
+            self._noter("modele_absent")
+            raise requests.RequestException(f"modèle {self.modele_claude} inconnu ({erreur.message})") from erreur
+        except (anthropic.AuthenticationError, anthropic.PermissionDeniedError) as erreur:
+            self.claude_utilisable = False
+            self._noter("erreur")
+            raise requests.RequestException(f"clé Claude refusée ({erreur.message})") from erreur
+        except anthropic.APIStatusError as erreur:   # quota, surcharge…
+            self._noter("erreur")
+            raise requests.RequestException(f"API Claude : {erreur.message}") from erreur
+        if reponse.stop_reason == "refusal":
+            raise requests.RequestException("Claude a refusé de répondre")
+        self._noter("ok")
+        return "".join(bloc.text for bloc in reponse.content if bloc.type == "text")
+
     def disponible(self):
+        if self.fournisseur == "Claude":
+            return True
         try:
             return requests.get(f"{self.url}/api/tags", timeout=2).ok
         except requests.RequestException:
