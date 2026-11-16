@@ -61,20 +61,20 @@ Les règles complètes sont dans [docs/protocole.md](docs/protocole.md#règles).
 
 ## Lancer une vraie partie
 
-Une seule fois sur chaque machine Python : installer [uv](https://docs.astral.sh/uv/), puis `uv sync` à la racine du dépôt.
+Une seule fois sur chaque machine Python : installer [uv](https://docs.astral.sh/uv/) (`curl -LsSf https://astral.sh/uv/install.sh | sh` sur un Pi). Pas besoin de `uv sync` : `uv run` installe ce qui manque.
 uv télécharge lui-même Python 3.14 (version fixée par `.python-version`), sans toucher au Python du système : il faut juste un accès Internet la première fois.
 
-1. **Broker** (Pi de Niels) : `cd broker && docker compose up -d`.
-2. **Chaque Raspberry Pi** :
-   ```bash
-   ollama pull qwen3:0.6b
-   cp joueur/config.example.json joueur/config.json   # régler id, ville, personnalité, nom, apparence
-   uv run joueur/joueur.py
-   ```
-3. **Maître du jeu** (n'importe quelle machine, par exemple le Pi du broker) : `uv run maitre_du_jeu/maitre.py`.
-   La partie démarre toute seule 30 s après la dernière arrivée, dès qu'il y a 3 IA (ou plus tôt avec Entrée).
-4. **Interface** (une machine avec Node.js ≥ 18) : `node interface/server.js`.
-   Les spectateurs ouvrent l'adresse affichée, par exemple `http://10.109.150.140:5050`.
+Ensuite, une commande de chaque côté :
+
+| Où | Commande | Ce qu'elle fait |
+|----|----------|-----------------|
+| **Serveur** (Pi du broker) | `uv run serveur.py` | trouve le broker (ou démarre celui de `broker/`), lance l'interface 3D et le maître du jeu |
+| **Chaque joueur** | `uv run joueur/joueur.py` | au premier lancement : 3 questions (nom, ville, caractère) qui écrivent `joueur/config.json`, démarre Ollama et télécharge le modèle s'il manque |
+
+Seul Ollama s'installe à la main sur chaque joueur, une fois : `curl -fsSL https://ollama.com/install.sh | sh` sur un Pi, [ollama.com/download](https://ollama.com/download) ailleurs.
+La partie démarre toute seule 30 s après la dernière arrivée, dès qu'il y a 3 IA (ou plus tôt avec Entrée dans le terminal du serveur).
+Les spectateurs ouvrent l'adresse affichée par le serveur, par exemple `http://10.109.150.140:5050`.
+On peut toujours lancer les morceaux séparément : `docker compose up -d` dans `broker/`, `uv run maitre_du_jeu/maitre.py`, `node interface/server.js`.
 
 Le nombre d'IA n'est pas fixé : de 3 à 12, autant qu'il y a de sièges. Une IA qui arrive en cours de partie attend la suivante.
 

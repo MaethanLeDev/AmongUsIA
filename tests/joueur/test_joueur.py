@@ -622,7 +622,7 @@ def test_fiche_de_l_espion_identique_a_celle_d_un_capteur(joueur_jeu, donner_rol
 def test_sante_indique_broker_et_ollama(joueur_jeu):
     joueur_jeu.client.connect("localhost")
 
-    assert joueur_jeu.sante() == {"status": "ok", "id": "rpi1", "broker": True, "ollama": True}
+    assert joueur_jeu.sante() == {"status": "ok", "id": "rpi1", "broker": True, "ollama": True, "llm": None}
 
 
 # --- config.json --------------------------------------------------------------

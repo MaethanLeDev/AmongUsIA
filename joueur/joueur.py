@@ -5,6 +5,7 @@ ville, modèle Ollama, personnalité, mémoire, nom et apparence dans l'interfac
 Il expose aussi l'API HTTP de l'agent du TP « RPi & Ollama » (voir api.py).
 
 Usage : uv run joueur/joueur.py [chemin/vers/config.json]
+Au premier lancement, config.json est créé en trois questions, et Ollama et son modèle sont préparés (installation.py).
 Protocole : docs/protocole.md
 """
 import copy
@@ -21,6 +22,7 @@ import paho.mqtt.client as mqtt
 
 from api import demarrer_api
 from ia import IA, Partie
+from installation import creer_config, preparer_ollama
 from meteo import Meteo
 
 DUREE_ECHANGE = 5             # secondes entre deux températures, fixé par le sujet
@@ -404,7 +406,11 @@ def main():
     sys.stdout.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)  # visibles tout de suite, même redirigés
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     chemin = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(__file__).with_name("config.json")
-    Joueur(lire_config(chemin)).lancer()
+    if not chemin.exists():
+        creer_config(chemin)
+    config = lire_config(chemin)
+    preparer_ollama(config)
+    Joueur(config).lancer()
 
 
 if __name__ == "__main__":
