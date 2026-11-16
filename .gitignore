@@ -6,6 +6,10 @@ joueur/config.json
 .vscode/
 node_modules/
 maitre_du_jeu/stats.json
+.coverage
+.pytest_cache/
+.ruff_cache/
+htmlcov/
 
 # Claude Code (réglages personnels)
 .claude/settings.local.json

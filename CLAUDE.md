@@ -33,9 +33,16 @@ uv run joueur/joueur.py [config.json]
 cd interface && node server.js                        # MQTT_HOST=localhost pour la simulation ; http://localhost:5050, /api/etat
 uv run python -m py_compile joueur/*.py maitre_du_jeu/*.py outils/*.py   # vérif syntaxe
 node --check interface/server.js                      # idem côté Node
+uv run pytest -q                                      # tests unitaires Python (quelques secondes)
+node --test "interface/tests/*.test.js"               # tests de l'interface
 ```
 
-Il n'y a pas de tests automatisés : la vérification, c'est la compilation + une simulation rapide dont on lit les journaux (skill `/verifier`).
+## Tests
+
+- Python : `tests/<module>/test_*.py` (pytest) ; interface : `interface/tests/*.test.js` (`node:test`, zéro dépendance npm). Conventions et commandes : section « Tests » du README.
+- Jamais de vrai broker, Ollama ou Internet : `faux_mqtt` (paho remplacé par `FauxClientMQTT`, `injecter(topic, contenu)`), `figer_temps`, `requests` simulé avec `monkeypatch`, faux broker TCP côté interface. Réutiliser `tests/aides.py` et les fixtures des `conftest.py` avant d'en écrire de nouvelles.
+- Un comportement par test, nom en français. Un test qui révèle un bug : `xfail(reason="bug : …")`, pas de correction du code de production sans accord. Quand un bug marqué xfail est corrigé, retirer la marque (`xfail_strict`).
+- Tout comportement modifié ou ajouté dans un module vient avec son test. Les tests ne remplacent pas la simulation rapide pour un changement de déroulement de partie (skill `/verifier`).
 
 ## Bonnes pratiques
 
@@ -46,7 +53,7 @@ Détaillées dans `.claude/rules/` : `qualite.md` (toujours chargé), `python.md
 ## Conventions de code
 
 - **Tout est en français** : noms de variables, fonctions, classes (`Joueur.voter`, `MaitreDuJeu.phase_verdict`), commentaires, docstrings, messages de log, README. Garder ce style, sans accents dans les identifiants.
-- Python ≥ 3.11 (Raspberry Pi OS Bookworm). Dépendances limitées à `paho-mqtt` (API v2 : callbacks avec `reason_code, properties`) et `requests`. N'en ajouter une qu'avec `uv add`, et seulement si c'est indispensable : elle doit s'installer sur un Pi.
+- Python 3.14 (fixé par `.python-version`, installé par uv sur chaque machine, y compris les Pi, sans toucher au Python du système). Dépendances limitées à `paho-mqtt` (API v2 : callbacks avec `reason_code, properties`) et `requests`. N'en ajouter une qu'avec `uv add`, et seulement si c'est indispensable : elle doit s'installer sur un Pi.
 - Les scripts sont lancés avec `uv run <dossier>/<script>.py` (pas un paquet : `package = false`) ; les imports entre fichiers d'un même dossier sont directs (`from ia import IA`).
 - Interface : **zéro dépendance npm**, Node seul (client MQTT 3.1.1 et WebSocket écrits à la main). `public/` est en modules ES servis tels quels, sans build. Ne jamais modifier `interface/public/vendor/` (Three.js fourni).
 - Messages MQTT : JSON UTF-8, `ensure_ascii=False`. Les `id` ne contiennent ni espace, ni `/`, `+`, `#`.

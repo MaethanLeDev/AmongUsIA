@@ -7,7 +7,7 @@ paths:
 
 # Bonnes pratiques Python du projet
 
-- Python ≥ 3.11 : f-strings, `pathlib.Path`, `X | None`, `match` si ça simplifie vraiment. Pas de syntaxe 3.12+ (les Pi sont en 3.11).
+- Python 3.14 (`.python-version`) : f-strings, `pathlib.Path`, `X | None`, `match` si ça simplifie vraiment. La syntaxe récente est permise, puisque uv installe la même version sur les Pi.
 - Le lint (ruff, règles dans `pyproject.toml`) est vérifié par la CI : écrire du code qui le respecte, sans lancer de lint ni de reformatage local.
 - Fichiers : toujours `encoding="utf-8"`, et `with open(...)`. JSON : `json.dumps(..., ensure_ascii=False)`.
 - Réseau (`requests`) : **toujours un `timeout=`**, capturer `requests.RequestException` et prévoir un repli (le Pi peut ne pas avoir Internet, Ollama peut être lent ou absent).
