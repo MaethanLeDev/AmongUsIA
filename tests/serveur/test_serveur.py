@@ -48,3 +48,9 @@ def test_avec_docker_mosquitto_est_demarre(lances, monkeypatch):
 
     assert lancements == [["docker", "compose", "up", "-d"]]
     assert processus == []   # le broker Docker n'est pas un enfant : il reste après Ctrl+C
+
+
+def test_broker_local_en_ipv4():
+    # Node traduit « localhost » en ::1 seulement : l'interface ne trouverait pas le broker Docker, qui écoute en IPv4
+    assert "localhost" not in serveur.BROKERS_CONNUS
+    assert serveur.LOCAL == "127.0.0.1"
