@@ -28,10 +28,11 @@ Chaque dossier a un README détaillé : le lire avant de modifier le module.
 ```bash
 uv sync                                               # une fois, à la racine
 uv run outils/simulation.py --joueurs 3 --rapide      # partie complète sans Pi ni Ollama (skill /simulation)
+uv run serveur.py                                     # côté serveur en une commande : broker si besoin, interface, maître
 uv run maitre_du_jeu/maitre.py --tp                   # mode exact du sujet : 1 manche, pas de débat, majorité
-uv run joueur/joueur.py [config.json]
+uv run joueur/joueur.py [config.json]                 # crée config.json et prépare Ollama au premier lancement
 cd interface && node server.js                        # MQTT_HOST=localhost pour la simulation ; http://localhost:5050, /api/etat
-uv run python -m py_compile joueur/*.py maitre_du_jeu/*.py outils/*.py   # vérif syntaxe
+uv run python -m py_compile serveur.py joueur/*.py maitre_du_jeu/*.py outils/*.py   # vérif syntaxe
 node --check interface/server.js                      # idem côté Node
 uv run pytest -q                                      # tests unitaires Python (quelques secondes)
 node --test "interface/tests/*.test.js"               # tests de l'interface

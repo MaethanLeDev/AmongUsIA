@@ -3,7 +3,7 @@
 Tout ce qu'il faut pour lancer une partie, avec ou sans Raspberry Pi, et tout ce qui se personnalise.
 Les commandes marchent telles quelles dans PowerShell (terminal de VS Code), cmd et bash : aucune variable d'environnement n'est nécessaire.
 
-À faire une fois par machine qui lance du Python : installer [uv](https://docs.astral.sh/uv/) (`pip install uv`, ou `curl -LsSf https://astral.sh/uv/install.sh | sh` sur un Pi), puis `uv sync` à la racine du dépôt.
+À faire une fois par machine qui lance du Python : installer [uv](https://docs.astral.sh/uv/) (`pip install uv`, ou `curl -LsSf https://astral.sh/uv/install.sh | sh` sur un Pi), puis c'est tout : `uv run` installe lui-même les dépendances au premier lancement.
 La machine de l'interface a besoin de Node.js 18 ou plus, sans `npm install`.
 
 ## Les façons de jouer
@@ -38,12 +38,23 @@ Toutes les IA partagent le même Ollama, qui répond à une seule à la fois : u
 
 ### 3. Vraie partie avec les Raspberry Pi
 
-| Où                       | Commande                                   | Remarque                                         |
-|--------------------------|--------------------------------------------|--------------------------------------------------|
-| Pi du broker (Niels)     | `cd broker && docker compose up -d`        | une fois ; il redémarre tout seul avec le Pi     |
-| Chaque Pi joueur         | `uv run joueur/joueur.py`                  | après avoir écrit `joueur/config.json` (voir plus bas) ; Ollama doit tourner |
-| Une machine, une seule fois | `uv run maitre_du_jeu/maitre.py`         | le Pi du broker convient très bien               |
-| Une machine avec Node    | `node interface/server.js`                 | les spectateurs ouvrent l'adresse « Depuis le réseau » affichée |
+| Où                       | Commande                    | Remarque                                         |
+|--------------------------|-----------------------------|--------------------------------------------------|
+| Serveur (Pi du broker)   | `uv run serveur.py`         | broker + interface + maître du jeu ; Ctrl+C arrête tout (le broker Docker reste) |
+| Chaque joueur            | `uv run joueur/joueur.py`   | crée `joueur/config.json` au premier lancement, démarre Ollama, télécharge le modèle |
+
+**Côté serveur**, `serveur.py` prend le premier broker qui répond (`localhost`, `amongus.local`, `10.109.150.215`).
+S'il n'y en a aucun, il démarre Mosquitto avec Docker (`broker/`), ou à défaut le broker de test `outils/broker_dev.py`.
+Il lance ensuite l'interface si Node.js est installé, puis le maître du jeu au premier plan (Entrée lance la partie).
+Ses options inconnues vont au maître : `uv run serveur.py --tp`, `uv run serveur.py --tours 3`. Autres options : `--broker <ip>` (ne cherche pas, n'en démarre pas), `--sans-interface`.
+Un seul serveur par broker : deux maîtres du jeu se déconnectent l'un l'autre.
+
+**Côté joueur**, seul [Ollama](https://ollama.com/download) s'installe à la main, une fois (`curl -fsSL https://ollama.com/install.sh | sh` sur un Pi).
+Au premier lancement, le joueur demande le nom de son IA, sa ville et son caractère (Entrée garde la proposition), et écrit `joueur/config.json`.
+Si Ollama est installé mais arrêté, il le démarre ; si le modèle manque, il le télécharge (une seule fois, quelques minutes).
+Sans Ollama, il démarre quand même et vote par calcul. Pour changer de réglages : modifier `joueur/config.json`, ou le supprimer et relancer.
+
+Les morceaux se lancent aussi séparément : `cd broker && docker compose up -d`, `uv run maitre_du_jeu/maitre.py`, `node interface/server.js`.
 
 Le maître et l'interface trouvent le broker tout seuls : `localhost`, puis `amongus.local`, puis `10.109.150.215`.
 La partie démarre 30 s après la dernière IA arrivée, dès qu'il y en a 3. Les parties s'enchaînent ensuite.
@@ -59,7 +70,7 @@ Pour comparer avec la méthode de calcul, mettez `"strategie": "ecart"` dans la 
 
 ## Personnaliser son IA : `joueur/config.json`
 
-On copie `joueur/config.example.json` en `joueur/config.json`, puis on l'adapte. Seuls `id` et `ville` sont obligatoires.
+Le premier lancement l'écrit tout seul ; on peut ensuite l'adapter (ou partir de `joueur/config.example.json`). Seuls `id` et `ville` sont obligatoires.
 
 ```json
 {
