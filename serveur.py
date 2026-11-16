@@ -1,6 +1,6 @@
 """Tout le côté serveur en une commande : broker (si aucun ne tourne), interface 3D et maître du jeu.
 
-1. Broker : on prend le premier qui répond parmi localhost, amongus.local, 10.109.150.215.
+1. Broker : on prend le premier qui répond parmi cette machine, amongus.local, 10.109.150.215.
    S'il n'y en a aucun, on démarre celui de broker/ (Docker), ou à défaut le broker de test (outils/broker_dev.py).
 2. Interface : node interface/server.js, si Node est installé (sinon la partie se joue sans spectateurs).
 3. Maître du jeu, au premier plan : Entrée lance la partie tout de suite. Ctrl+C arrête tout
@@ -22,7 +22,9 @@ import time
 from pathlib import Path
 
 RACINE = Path(__file__).resolve().parent
-BROKERS_CONNUS = ["localhost", "amongus.local", "10.109.150.215"]   # même ordre que le maître et l'interface
+# 127.0.0.1 et pas localhost : Node traduit localhost en ::1 (IPv6) sans essayer l'IPv4, où écoute le broker Docker
+LOCAL = "127.0.0.1"
+BROKERS_CONNUS = [LOCAL, "amongus.local", "10.109.150.215"]   # même ordre que le maître et l'interface
 PORT_MQTT = 1883
 DEMARRAGE_BROKER = 20   # secondes : le premier « docker compose up » télécharge l'image
 
@@ -38,7 +40,7 @@ def joignable(hote, port=PORT_MQTT, delai=1.0):
 def attendre_broker(delai=DEMARRAGE_BROKER):
     fin = time.monotonic() + delai
     while time.monotonic() < fin:
-        if joignable("localhost"):
+        if joignable(LOCAL):
             return True
         time.sleep(0.5)
     return False
@@ -83,8 +85,8 @@ def main():
         hote = args.broker or next((h for h in BROKERS_CONNUS if joignable(h)), None)
         if hote is None:
             demarrer_broker(processus)
-            hote = "localhost"
-        if hote == "localhost":
+            hote = LOCAL
+        if hote == LOCAL:
             print(f"Broker sur cette machine. Les joueurs le trouvent par amongus.local, sinon : \"broker\": "
                   f"{{\"hote\": \"{adresse_reseau()}\"}} dans leur config.json")
         else:
