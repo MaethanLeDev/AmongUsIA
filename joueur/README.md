@@ -3,11 +3,15 @@
 Le même code tourne sur toutes les machines. Seul `config.json` change : chacun y règle sa ville, son modèle, la personnalité de son IA et son apparence à la table.
 
 ```bash
-uv sync                                          # une fois, à la racine du dépôt
-ollama pull qwen3:0.6b                           # ou un autre modèle
-cp joueur/config.example.json joueur/config.json # puis l'adapter
 uv run joueur/joueur.py                          # ou : uv run joueur/joueur.py autre_config.json
 ```
+
+Au premier lancement (`installation.py`) :
+- s'il n'y a pas de `config.json`, trois questions (nom de l'IA, ville, caractère ; Entrée garde la proposition) l'écrivent. L'`id` vient du nom, l'apparence est tirée au sort. Lancé sans terminal (service systemd), tout est tiré au sort ;
+- si Ollama est installé mais ne répond pas, il lance `ollama serve` ;
+- si le modèle n'est pas installé, il le télécharge (`/api/pull`, comme `ollama pull`), avec la progression.
+
+Seul Ollama lui-même s'installe à la main (`curl -fsSL https://ollama.com/install.sh | sh` sur un Pi). Sans lui, le joueur démarre quand même et vote par calcul.
 
 ## Configuration
 
