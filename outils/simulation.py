@@ -8,6 +8,8 @@ Usage :
     uv run outils/simulation.py --joueurs 8 --rapide     débat court, pour tester vite
     uv run outils/simulation.py --ollama http://127.0.0.1:11434 --modele qwen3:0.6b   avec un vrai LLM
     uv run outils/simulation.py --broker 10.109.150.215  sur le vrai broker (attention : visible par tous)
+    uv run outils/simulation.py --bots --joueurs 3 --broker amongus.local --ollama http://127.0.0.1:11434 --modele qwen3:4b
+                                                         ajoute 3 bots à la vraie partie (sans maître), tous votent par LLM
 Les arguments après -- vont au maître du jeu : uv run outils/simulation.py -- --tp
 """
 import argparse
@@ -64,6 +66,21 @@ def verifier_ollama(url, modele):
     print(f"Ollama prêt sur {url}, modèle {modele}.")
 
 
+def config_joueur(i, args):
+    """La config du i-ème joueur lancé. Les bots votent tous par LLM ; en simulation, une IA sur 4 vote par calcul
+    pour comparer les deux méthodes."""
+    nom, arch, personnalite = PERSONNAGES[i]
+    ville, lat, lon = VILLES[i]
+    return {
+        "id": f"{'bot' if args.bots else 'sim'}{i + 1}", "ville": ville, "coordonnees": [lat, lon],
+        "broker": {"hote": args.broker or "localhost", "port": 1883},
+        "ollama": {"url": args.ollama or "http://127.0.0.1:11435", "modele": args.modele if args.ollama else "simulé"},
+        "personnalite": personnalite, "strategie": "llm" if args.bots or i % 4 else "ecart",
+        "memoire": "resume" if args.resume else "faits",
+        "interface": {"nom": nom, "arch": arch}, "api": {"port": 5100 + i},
+    }
+
+
 def main():
     sys.stdout.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)  # console Windows : pas de plantage sur un emoji
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
@@ -75,9 +92,14 @@ def main():
     parser.add_argument("--modele", default="qwen3:0.6b")
     parser.add_argument("--rapide", action="store_true", help="un tour de débat, pauses courtes")
     parser.add_argument("--resume", action="store_true", help="mémoire \"resume\" : le LLM écrit ses notes à chaque manche")
+    parser.add_argument("--bots", action="store_true",
+                        help="seulement des joueurs en plus pour la partie du --broker : pas de maître, tous votent par LLM")
     args, pour_le_maitre = parser.parse_known_args()
     pour_le_maitre = [a for a in pour_le_maitre if a != "--"]
-    n = max(2, min(args.joueurs, len(PERSONNAGES)))
+    if args.bots and not args.broker:
+        # Sans broker existant, il n'y a pas de partie à rejoindre (et pas de maître pour la lancer)
+        parser.error("--bots demande le --broker de la partie à rejoindre")
+    n = max(1 if args.bots else 2, min(args.joueurs, len(PERSONNAGES)))
     if args.ollama:
         verifier_ollama(args.ollama.rstrip("/"), args.modele)
 
@@ -95,20 +117,18 @@ def main():
                      f"Voir {dossier}. Arrêtez l'ancienne simulation (ou les python.exe restants) et relancez.")
 
         for i in range(n):
-            nom, arch, personnalite = PERSONNAGES[i]
-            ville, lat, lon = VILLES[i]
-            config = {
-                "id": f"sim{i + 1}", "ville": ville, "coordonnees": [lat, lon],
-                "broker": {"hote": args.broker or "localhost", "port": 1883},
-                "ollama": {"url": args.ollama or "http://127.0.0.1:11435", "modele": args.modele if args.ollama else "simulé"},
-                "personnalite": personnalite, "strategie": "llm" if i % 4 else "ecart",
-                "memoire": "resume" if args.resume else "faits",
-                "interface": {"nom": nom, "arch": arch}, "api": {"port": 5100 + i},
-            }
-            chemin = dossier / f"sim{i + 1}.json"
+            config = config_joueur(i, args)
+            chemin = dossier / f"{config['id']}.json"
             chemin.write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")
-            processus.append(lancer(["joueur/joueur.py", chemin], dossier / f"sim{i + 1}.log"))
+            processus.append(lancer(["joueur/joueur.py", chemin], dossier / f"{config['id']}.log"))
             time.sleep(0.3)
+
+        if args.bots:
+            # Le maître du serveur mène la partie : un second maître sur le même broker les déconnecterait en boucle
+            print(f"{n} bots lancés sur {args.broker} (journaux : {dossier}). Ctrl+C pour les retirer.")
+            for p in processus:
+                p.wait()
+            return
 
         reglages = ["--broker", args.broker or "localhost", "--auto", "8", "--stats", dossier / "stats.json"]
         if args.rapide:

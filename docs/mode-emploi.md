@@ -130,6 +130,15 @@ Détails : [maitre_du_jeu/README.md](../maitre_du_jeu/README.md).
 | `--ollama URL --modele M`    | un vrai LLM au lieu du faux Ollama                                            |
 | `--resume`                   | toutes les IA en mémoire `resume`                                            |
 | `--broker IP`                | utiliser un broker existant au lieu du broker de test (attention : visible par tous) |
+| `--bots`                     | ajouter N IA (`bot1`, `bot2`…) à la partie du `--broker`, sans lancer de maître ni de broker : elles votent toutes par LLM (le calcul ne sert qu'en secours si le LLM ne répond pas) |
+
+Pour compléter une vraie partie avec 3 bots, branchés sur un vrai LLM, avant qu'elle démarre :
+
+```bash
+uv run outils/simulation.py --bots --joueurs 3 --broker amongus.local --ollama http://127.0.0.1:11434 --modele qwen3:4b
+```
+
+Sans `--ollama`, les bots utilisent le faux Ollama : ils parlent par phrases toutes faites. Ctrl+C les retire.
 
 Tout ce qui suit `--` est transmis **au maître du jeu**. Par exemple, pour simuler le jeu de base du TP :
 
