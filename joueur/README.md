@@ -25,6 +25,8 @@ Seul Ollama lui-même s'installe à la main (`curl -fsSL https://ollama.com/inst
 | `gemini`       |             | `{"cle_api": "ta clé", "modele": "gemini-3.8-flash"}` : l'IA parle avec Gemini au lieu d'Ollama. Clé vide ou bloc absent : Ollama seul. Voir « Gemini » plus bas |
 | `personnalite` |             | le caractère de l'IA, en une ou deux phrases (« Tu es… »)                                         |
 | `strategie`    |             | `llm` (le LLM vote, valeur par défaut) ou `ecart` (calcul seul, le jeu de base du TP)              |
+| `meteo`        |             | `reelle` (par défaut : la température actuelle) ou `historique` : voir « Météo historique » plus bas. **À régler pareil sur tous les Pi** |
+| `vote_honnete` |             | `llm` (par défaut) ou `calcul` : avec `"strategie": "llm"`, `calcul` fait voter par le calcul quand l'IA est capteur honnête (il trouve l'espion), et laisse le LLM voter seulement quand elle est l'espion (il vote alors avec la majorité, contre un innocent crédible) |
 | `memoire`      |             | `faits` (par défaut) ou `resume` : voir plus bas                                                 |
 | `interface`    |             | `nom` (16 caractères), `arch` (`stratege`, `vengeur`, `sourire`, `reine`, `ombre`, `prodige`), `couleurs` (`cheveux`, `yeux`, `accent` en `#rrggbb`) |
 | `api`          |             | `{"port": 5000}` : port de l'API de l'agent ; `0` pour la couper                                  |
@@ -66,6 +68,17 @@ Avec une clé API Google, l'IA débat avec Gemini : ses répliques sont bien mei
 - **Pendant la partie**, si Gemini ne répond pas (coupure, quota dépassé, réponse bloquée) ou met plus de 30 s, la même demande part à Ollama : l'IA ne perd pas son tour. Ollama doit donc rester installé.
 - **Le vote** : `"strategie": "ecart"` garde le vote par calcul (le plus fiable) et laisse Gemini débattre. Avec `llm`, Gemini vote aussi, et le calcul reste le repli si sa réponse est inexploitable. `"memoire": "resume"` donne de bonnes notes entre les manches avec Gemini.
 - L'interface et `GET /agent` annoncent le modèle Gemini ; `GET /health` garde son champ `ollama`, qui reste celui du repli.
+
+## Météo historique (mode difficile)
+
+Avec `"meteo": "historique"`, un capteur honnête ne publie plus la température d'à l'instant, mais, **à chaque mesure**, la vraie température de sa ville à un jour et une heure tirés au hasard dans les trois dernières années (API d'archives Open-Meteo, chargée une fois au lancement). Une valeur est donc parfois -4 °C, parfois 27 °C, pour tout le monde : l'écart constant ne trahit plus l'espion, et le calcul `ecart` ne le trouve plus.
+
+- **Le mois est publié** avec chaque mesure (`"mois": 7`), jamais le jour ni l'heure. L'IA juge si une valeur est plausible pour la ville et le mois (28 °C à Annecy en janvier est impossible). Les autres champs ne changent pas : voir `docs/protocole.md`.
+- **L'espion** garde sa règle (moyenne des autres, décalée de 5 à 10 %) et annonce le mois dont le climat de sa ville est le plus proche de sa fausse valeur. Ses valeurs restent trop proches de la moyenne des autres, ce qui est la piste à suivre pour le démasquer.
+- **Les prompts** changent tout seuls : dès qu'une mesure annonce un mois, le tableau affiche « juil. 24.0 °C » au lieu de STABLE/INSTABLE et les consignes de rôle parlent de climat. Un Gemini fait ce raisonnement bien mieux qu'un petit modèle Ollama.
+- **Le vote** : `vote_honnete: "calcul"` est ignoré dans ce mode (le calcul n'a plus rien à trouver), le LLM vote.
+- **Tous les Pi** doivent avoir le même réglage, sinon ceux restés en `reelle` publient des valeurs constantes qui paraissent parfaites à côté des autres.
+- Sans Internet, un honnête retombe sur la température actuelle (sans mois), et l'espion annonce un mois au hasard.
 
 ## Mémoire entre les manches
 
