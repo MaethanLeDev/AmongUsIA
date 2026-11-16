@@ -117,6 +117,15 @@ Ce topic est imposé par le sujet.
 - **Joueur normal** : la température réelle de sa ville (API Open-Meteo). Les villes sont voisines les unes des autres (sujet : « une ville adjacente aux machines du système »).
 - **Espion** : la moyenne des dernières valeurs des autres, décalée aléatoirement de 5 à 10 % vers le haut ou le bas (au moins 0,3 °C, pour rester détectable près de 0 °C).
 
+Champ facultatif `"mois": 7` (entier de 1 à 12), présent seulement dans le mode météo « historique » ci-dessous.
+
+**Mode météo « historique »** (option `"meteo": "historique"` de `joueur/config.json`, `"reelle"` par défaut). Il doit être réglé de la même façon sur **tous** les Pi d'une partie, car chacun publie ses propres mesures.
+- **Joueur normal** : à chaque échange, la vraie température de sa ville à un jour et une heure tirés au hasard dans les trois dernières années (API d'archives Open-Meteo, chargée une fois). Les valeurs de chacun sautent donc d'une mesure à l'autre : l'écart constant ne trahit plus l'espion.
+- **Espion** : inchangé pour la valeur (moyenne des autres, décalée de 5 à 10 %).
+- **Champ `mois`**, ajouté à chaque mesure dans ce mode seulement : le mois de la mesure (pour l'espion, le mois dont le climat de sa ville est le plus proche de sa fausse valeur). C'est la seule information qui permet de juger si une valeur est plausible pour une ville ; le jour et l'heure ne sont jamais publiés. Un lecteur qui ne le connaît pas l'ignore.
+- Sans archives (pas d'Internet), un joueur normal publie la température actuelle, sans `mois`.
+- Le calcul `ecart` ne trouve plus l'espion dans ce mode : seul un LLM qui juge le climat peut le faire. Le mode `--tp` du maître reste destiné au jeu de base (`"meteo": "reelle"`).
+
 ### `iot/partie/parole` : tour de parole (maître → tous)
 
 ```json

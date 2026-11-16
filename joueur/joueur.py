@@ -34,6 +34,8 @@ class Joueur:
         self.config = config
         self.id = config["id"]
         self.meteo = Meteo(config["ville"], config.get("coordonnees"))
+        # "historique" : à chaque mesure, une température réelle d'un jour et d'une heure au hasard des trois dernières années
+        self.historique = config.get("meteo", "reelle") == "historique"
         self.ia = IA(config)
         self.ia.quand_etat_change = self._llm_change
         self.verrou = threading.Lock()
@@ -77,6 +79,8 @@ class Joueur:
             except OSError as erreur:
                 self.log(f"API non démarrée, port {port} occupé ? ({erreur})")
         self.en_arriere_plan(self.meteo.temperature)  # géocode tout de suite : une ville introuvable se voit au lancement
+        if self.historique:
+            self.en_arriere_plan(self.meteo.historique)   # les archives (trois ans) se chargent avant la première mesure
         self.en_arriere_plan(self.verifier_llm)       # de même pour un Ollama arrêté ou un modèle pas installé
         try:
             self.client.loop_forever()
@@ -166,7 +170,10 @@ class Joueur:
         with self.verrou:
             if self.de_la_partie(mesure) and isinstance(temperature, (int, float)):
                 manche = self.partie.manche(mesure.get("manche"))
-                manche.mesures.setdefault(msg.topic.split("/")[2], []).append(temperature)
+                id_capteur = msg.topic.split("/")[2]
+                mois = mesure.get("mois")   # annoncé seulement en mode météo « historique »
+                manche.mesures.setdefault(id_capteur, []).append(temperature)
+                manche.mois.setdefault(id_capteur, []).append(mois if type(mois) is int and 1 <= mois <= 12 else None)
 
     def _on_chat(self, client, userdata, msg):
         message = lire_json(msg.payload)
@@ -251,15 +258,26 @@ class Joueur:
         for echange in range(1, etat.get("echanges", 5) + 1):
             if not self.encore(etat):
                 return
-            temperature = self.meteo.temperature() if role == "normal" else self.fausse_temperature(etat["manche"])
+            temperature, mois = self.prendre_mesure(role, etat["manche"])
             if temperature is not None:
                 self.publier(f"iot/capteurs/{self.id}/temperature", {
                     "id": self.id, "ville": self.config["ville"], "temperature": round(temperature, 1),
                     "echange": echange, "manche": etat["manche"], "partie": etat["partie"], "ts": int(time.time()),
+                    **({"mois": mois} if mois else {}),
                 })
-                self.log(f"manche {etat['manche']}, échange {echange} : {temperature:.1f} °C")
+                self.log(f"manche {etat['manche']}, échange {echange} : {temperature:.1f} °C" + (f" (mois {mois})" if mois else ""))
             # Toutes les 5 s pile, même si l'API météo a mis du temps à répondre
             time.sleep(max(0, debut + echange * DUREE_ECHANGE - time.monotonic()))
+
+    def prendre_mesure(self, role, manche):
+        """(température, mois) d'un échange. Le mois n'existe qu'en mode « historique » : c'est lui qui permet aux autres
+        de juger si la valeur est plausible. Sans archives, un honnête retombe sur la température actuelle (sans mois)."""
+        if role == "normal":
+            tirage = self.meteo.tirage() if self.historique else None
+            return (tirage[1], tirage[0]) if tirage else (self.meteo.temperature(), None)
+        temperature = self.fausse_temperature(manche)
+        mois = self.meteo.mois_pour(temperature) if self.historique and temperature is not None else None
+        return temperature, mois
 
     def fausse_temperature(self, manche):
         # L'espion part de la moyenne des dernières valeurs des autres (ou de sa vraie température au début)
@@ -390,6 +408,10 @@ def lire_config(chemin):
         erreurs.append('"ville" : la ville dont on publie la température (ex : "Annecy")')
     if config.get("strategie", "llm") not in ("llm", "ecart"):
         erreurs.append('"strategie" : "llm" ou "ecart"')
+    if config.get("meteo", "reelle") not in ("reelle", "historique"):
+        erreurs.append('"meteo" : "reelle" (température actuelle) ou "historique" (jour et heure au hasard des 3 dernières années)')
+    if config.get("vote_honnete", "llm") not in ("llm", "calcul"):
+        erreurs.append('"vote_honnete" : "llm" ou "calcul"')
     if config.get("memoire", "faits") not in ("faits", "resume"):
         erreurs.append('"memoire" : "faits" ou "resume"')
     gemini = config.get("gemini", {})

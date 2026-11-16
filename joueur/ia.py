@@ -30,13 +30,50 @@ ROLES = {
     "normal": "Ton rôle secret : CAPTEUR HONNÊTE. Tes températures sont vraies. "
               "Un capteur honnête garde le même écart avec les autres d'une mesure à l'autre : sa ville est juste "
               "plus chaude ou plus froide, c'est normal. Méfie-toi de celui dont l'écart avec les autres CHANGE "
-              "à chaque mesure.",
+              "à chaque mesure.\n"
+              "Tactique : prends la main sur le débat. Désigne dès ton premier tour le joueur INSTABLE du tableau, "
+              "avec ses chiffres, et pousse les autres à voter pour lui avec toi : une accusation chiffrée et "
+              "tenue d'un tour à l'autre entraîne les indécis. Si quelqu'un d'autre accuse un joueur STABLE, "
+              "démonte-le : un écart constant est normal, ses chiffres le prouvent. Attention, l'espion "
+              "essaie de se fondre dans la majorité : celui qui accuse sans aucun chiffre ou qui change de cible "
+              "au fil des tours est suspect.",
     "espion": "Ton rôle secret : ESPION. Tes températures sont fausses. Ne l'avoue jamais et ne te désigne jamais "
               "comme espion. Justifie tes valeurs (microclimat, capteur au soleil, altitude…) et détourne "
-              "les soupçons vers un autre joueur, de façon crédible.",
+              "les soupçons vers un autre joueur, de façon crédible.\n"
+              "Tactique de manipulateur : tu gagnes en restant dans la majorité, jamais en étant le plus bruyant. "
+              "Parle avec des chiffres comme un capteur honnête, et ne te défends pas de façon excessive. "
+              "Laisse les autres s'accuser entre eux, rejoins l'accusation déjà la plus répandue (surtout "
+              "si elle vise un innocent) et ajoute un argument chiffré qui la renforce. Si on te soupçonne, "
+              "reste calme, retourne un chiffre contre l'accusateur et rappelle qu'un écart constant est normal. "
+              "Sème le doute sur le joueur le plus crédible comme espion, jamais sur le même d'un tour à l'autre "
+              "sans raison. Reste cohérent avec ce que tu as dit aux manches précédentes.",
 }
 
-GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/{modele}"  # + ":generateContent" pour générer
+# Mode météo « historique » (config "meteo": "historique") : les mesures des honnêtes sautent d'un mois à l'autre.
+# Le mois est publié avec chaque température : c'est lui qui permet de juger si une valeur est plausible.
+ROLES_CLIMAT = {
+    "normal": "Ton rôle secret : CAPTEUR HONNÊTE. Dans cette partie, chaque mesure d'un capteur honnête est la VRAIE "
+              "température de sa ville à un jour et une heure tirés au hasard ces trois dernières années, et le mois est "
+              "annoncé. Les valeurs d'un même joueur sautent donc beaucoup d'une mesure à l'autre : c'est normal et cela ne "
+              "prouve rien. Ce qui compte, c'est que chaque valeur soit plausible pour SA ville et SON mois (28 °C à Annecy "
+              "en janvier est impossible, -3 °C en février est normal, une nuit est plus froide qu'un après-midi). "
+              "L'espion, lui, invente ses valeurs à partir de la moyenne des autres : elles restent proches de cette moyenne, "
+              "varient peu, ou ne correspondent pas au climat de sa ville pour le mois annoncé.\n"
+              "Tactique : repère la valeur la plus invraisemblable (ville, mois, chiffre) et accuse son auteur en citant "
+              "ces trois éléments. Entraîne les autres derrière toi : une accusation climatique précise et tenue d'un "
+              "tour à l'autre convainc. Si on t'accuse, donne le climat réel de ta ville pour les mois que tu as publiés.",
+    "espion": "Ton rôle secret : ESPION. Tes températures sont fausses : calculées d'après la moyenne des autres, avec "
+              "un mois annoncé qui les rend crédibles. Ne l'avoue jamais et ne te désigne jamais comme espion. "
+              "Justifie tes valeurs (microclimat, altitude, effet du lac, nuit ou après-midi) et détourne les soupçons.\n"
+              "Tactique de manipulateur : les valeurs de tous les joueurs sautent d'un mois à l'autre, c'est ton "
+              "camouflage. Reste dans la majorité : rejoins l'accusation la plus répandue et ajoute un argument climatique "
+              "(ville, mois, chiffre) qui la renforce. Accuse un joueur dont une valeur paraît irréaliste pour son mois, "
+              "ou dont les valeurs ne varient pas assez. Si on te soupçonne, réponds calmement avec le climat de ta ville "
+              "et retourne un chiffre contre l'accusateur. Reste cohérent avec ce que tu as dit aux manches précédentes.",
+}
+MOIS = ("janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.", "oct.", "nov.", "déc.")
+
+GEMINI_URL ="https://generativelanguage.googleapis.com/v1beta/models/{modele}"  # + ":generateContent" pour générer
 GEMINI_MODELE = "gemini-3.8-flash"  # modèle par défaut quand config.json n'en donne pas (les anciens 2.5 sont dépréciés)
 DELAI_GEMINI = 30  # secondes : plus lent que ça, on passe à Ollama plutôt que de rater son tour de parole
 
@@ -62,6 +99,7 @@ class Manche:
     def __init__(self, numero):
         self.numero = numero
         self.mesures = {}     # id -> températures, dans l'ordre des échanges (y compris les siennes)
+        self.mois = {}        # id -> mois (1 à 12, None s'il n'est pas annoncé) de chaque température, même ordre que mesures
         self.debat = []       # (id, texte), dans l'ordre
         self.votes = {}       # votant -> suspect
         self.verdict = None   # message iot/partie/verdict
@@ -88,6 +126,10 @@ class Partie:
 
     def nom(self, id_joueur):
         return self.noms.get(id_joueur) or id_joueur
+
+    def climat(self):
+        """Vrai si les capteurs annoncent le mois de leurs mesures (mode météo « historique »)."""
+        return any(m is not None for manche in self.manches.values() for mois in manche.mois.values() for m in mois)
 
     def autres(self):
         return [i for i in (self.vivants or self.participants or self.manche().mesures) if i != self.moi]
@@ -131,7 +173,25 @@ def suspect_par_calcul(partie):
     return suspect, f"son écart aux autres change de {analyse[suspect]['variation']:.1f} °C d'une mesure à l'autre"
 
 
+def tableau_climat(partie):
+    """Mode « historique » : chaque température avec son mois. Pas de STABLE/INSTABLE : tout le monde varie, à bon droit ou non."""
+    manche = partie.manche()
+    lignes = []
+    for id_joueur in partie.vivants or manche.mesures:
+        valeurs = manche.mesures.get(id_joueur, [])
+        if not valeurs:
+            lignes.append(f"- {partie.nom(id_joueur)} : aucune mesure")
+            continue
+        mois = manche.mois.get(id_joueur, [])
+        mesures = [f"{MOIS[m - 1] if m else '?'} {v:.1f} °C" for v, m in zip(valeurs, mois + [None] * len(valeurs), strict=False)]
+        moi = " (toi)" if id_joueur == partie.moi else ""
+        lignes.append(f"- {partie.nom(id_joueur)}{moi}, {partie.villes.get(id_joueur, '?')} : {' ; '.join(mesures)}")
+    return "\n".join(lignes)
+
+
 def tableau_mesures(partie):
+    if partie.climat():
+        return tableau_climat(partie)
     mesures = partie.manche().mesures
     analyse = analyser({i: v for i, v in mesures.items() if v and (i in partie.vivants or not partie.vivants)})
     lignes = []
@@ -224,6 +284,7 @@ class IA:
         self.gemini_utilisable = True   # passe à False si Google refuse la clé ou ne connaît pas le modèle : inutile d'insister
         self.strategie = config.get("strategie", "llm")
         self.memoire = config.get("memoire", "faits")
+        self.vote_honnete = config.get("vote_honnete", "llm")   # "calcul" : honnête, on vote par le calcul même avec strategie "llm"
         # État du LLM, affiché par l'interface : ok, injoignable, modele_absent, trop_lent, erreur (None : pas encore testé)
         self.etat_llm = None
         self.quand_etat_change = None  # le joueur republie sa présence quand l'état change
@@ -373,7 +434,8 @@ class IA:
     # --- Le jeu ---
 
     def _systeme(self, partie):
-        return REGLES.format(nom=self.nom, id=self.id, personnalite=self.personnalite, role=ROLES[partie.role])
+        roles = ROLES_CLIMAT if partie.climat() else ROLES
+        return REGLES.format(nom=self.nom, id=self.id, personnalite=self.personnalite, role=roles[partie.role])
 
     def _demander(self, partie, consigne, delai, max_tokens, json_attendu=False, temperature=0.8):
         passe = memoire(partie)
@@ -412,13 +474,23 @@ class IA:
         """Renvoie (suspect, raison, calcul). calcul = le suspect de la méthode sans LLM, pour comparer (extension du TP).
         Repli sur le calcul si le LLM ne donne pas de réponse exploitable."""
         calcul, detail = suspect_par_calcul(partie)
-        if self.strategie != "llm":
+        honnete_par_calcul = self.vote_honnete == "calcul" and partie.role != "espion" and not partie.climat()
+        if self.strategie == "ecart" or honnete_par_calcul:
+            # vote_honnete "calcul" : honnête, on vote par le calcul (il trouve l'espion), et le LLM ne sert qu'à l'espion.
+            # Sauf en mode « historique » : tout le monde varie, le calcul ne trouve plus rien, seul le LLM juge le climat.
             return calcul, detail, calcul
 
         candidats = {i: partie.nom(i) for i in partie.autres()}
         liste = ", ".join(f"{i} ({nom})" for i, nom in candidats.items())
-        consigne = ("Le débat est terminé, c'est l'heure du vote. Qui est l'espion ? Tu ne peux pas voter pour toi. "
-                    f"Identifiants possibles : {liste}.\n"
+        if partie.role == "espion":
+            # L'espion ne cherche pas l'espion : il vote avec la majorité du débat, contre un innocent crédible
+            question = ("Le débat est terminé, c'est l'heure du vote. Tu es l'espion : vote pour l'innocent que les "
+                        "autres soupçonnent déjà le plus, pour rester dans la majorité et te faire oublier. "
+                        "Sans accusation dominante, prends le joueur dont les chiffres paraissent le plus louches. "
+                        "Tu ne peux pas voter pour toi.")
+        else:
+            question = "Le débat est terminé, c'est l'heure du vote. Qui est l'espion ? Tu ne peux pas voter pour toi."
+        consigne = (f"{question} Identifiants possibles : {liste}.\n"
                     'Réponds uniquement en JSON : {"suspect": "<identifiant>", "raison": "<une phrase courte>"}')
         try:
             brut = self._demander(partie, consigne, delai, max_tokens=200, json_attendu=True)
