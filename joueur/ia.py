@@ -1,5 +1,7 @@
-"""Le cerveau d'un joueur : il débat, vote et se souvient des manches passées, avec un LLM Ollama.
+"""Le cerveau d'un joueur : il débat, vote et se souvient des manches passées, avec un LLM.
 
+Le LLM est Gemini si config.json contient une clé ("gemini": {"cle_api": ...}), Ollama sinon.
+Ollama reste le repli de Gemini : une panne ou un quota dépassé ne fait pas perdre son tour de parole.
 Tout ce qui se personnalise (modèle, personnalité, mémoire) vient de config.json.
 """
 import json
@@ -33,6 +35,10 @@ ROLES = {
               "comme espion. Justifie tes valeurs (microclimat, capteur au soleil, altitude…) et détourne "
               "les soupçons vers un autre joueur, de façon crédible.",
 }
+
+GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/{modele}"  # + ":generateContent" pour générer
+GEMINI_MODELE = "gemini-3.8-flash"  # modèle par défaut quand config.json n'en donne pas (les anciens 2.5 sont dépréciés)
+DELAI_GEMINI = 30  # secondes : plus lent que ça, on passe à Ollama plutôt que de rater son tour de parole
 
 AGENT = """Tu es {nom}, un agent conversationnel qui tourne sur un Raspberry Pi avec le modèle {modele}.
 Ta personnalité : {personnalite}
@@ -212,11 +218,25 @@ class IA:
         self.personnalite = config.get("personnalite", "Tu es calme et logique.")
         self.url = config["ollama"]["url"].rstrip("/")
         self.modele = config["ollama"]["modele"]
+        gemini = config.get("gemini") or {}
+        self.cle_gemini = str(gemini.get("cle_api") or "").strip()   # vide : Gemini désactivé, Ollama seul
+        self.modele_gemini = gemini.get("modele") or GEMINI_MODELE
+        self.gemini_utilisable = True   # passe à False si Google refuse la clé ou ne connaît pas le modèle : inutile d'insister
         self.strategie = config.get("strategie", "llm")
         self.memoire = config.get("memoire", "faits")
         # État du LLM, affiché par l'interface : ok, injoignable, modele_absent, trop_lent, erreur (None : pas encore testé)
         self.etat_llm = None
         self.quand_etat_change = None  # le joueur republie sa présence quand l'état change
+
+    @property
+    def fournisseur(self):
+        """Le LLM qui répond en premier : « Gemini » (clé configurée et acceptée), sinon « Ollama »."""
+        return "Gemini" if self.cle_gemini and self.gemini_utilisable else "Ollama"
+
+    @property
+    def modele_actif(self):
+        """Le modèle de ce fournisseur, celui qu'on annonce aux autres joueurs."""
+        return self.modele_gemini if self.fournisseur == "Gemini" else self.modele
 
     def _noter(self, etat):
         if etat != self.etat_llm:
@@ -225,7 +245,33 @@ class IA:
                 self.quand_etat_change(etat)
 
     def verifier(self):
-        """Ollama répond-il, et le modèle est-il installé ? Renvoie None si tout va bien, sinon ce qu'il faut faire."""
+        """Le LLM est-il prêt ? Renvoie None si tout va bien, sinon ce qu'il faut faire.
+        Avec une clé Gemini, une panne de Gemini n'est qu'un avertissement tant qu'Ollama peut prendre le relais."""
+        if self.cle_gemini:
+            alerte = self._verifier_gemini()
+            if alerte is None:
+                self._noter("ok")
+                return None
+            print(f"  ⚠ {alerte}")
+        return self._verifier_ollama()
+
+    def _verifier_gemini(self):
+        """Google accepte-t-il la clé, et connaît-il le modèle ? (models.get : ne consomme pas de quota de génération.)"""
+        try:
+            reponse = requests.get(GEMINI_URL.format(modele=self.modele_gemini),
+                                   headers={"x-goog-api-key": self.cle_gemini}, timeout=10)
+        except requests.RequestException as erreur:
+            return f"Gemini ne répond pas ({erreur}), Ollama prendra le relais"
+        if reponse.status_code == 404:
+            self.gemini_utilisable = False
+            return f"le modèle Gemini {self.modele_gemini} n'existe pas : corrigez \"gemini.modele\" dans config.json"
+        if reponse.status_code in (400, 401, 403):
+            self.gemini_utilisable = False
+            return f"Gemini refuse la clé : vérifiez \"gemini.cle_api\" dans config.json ({detail_erreur(reponse)})"
+        return None
+
+    def _verifier_ollama(self):
+        """Ollama répond-il, et le modèle est-il installé ?"""
         try:
             reponse = requests.get(f"{self.url}/api/tags", timeout=5)
             reponse.raise_for_status()
@@ -242,6 +288,49 @@ class IA:
         return None
 
     def discuter(self, messages, delai, max_tokens, json_attendu=False, temperature=0.8):
+        """Un appel au LLM : Gemini si une clé est configurée, avec Ollama en repli s'il échoue ; sinon Ollama seul.
+        Lève requests.RequestException si aucun des deux ne répond."""
+        if self.fournisseur == "Gemini":
+            debut = time.monotonic()
+            try:
+                return self._gemini(messages, min(delai, DELAI_GEMINI), max_tokens, json_attendu, temperature)
+            except requests.RequestException as erreur:
+                print(f"  Gemini indisponible ({erreur}), on passe à Ollama")
+                delai = max(5, delai - (time.monotonic() - debut))   # Ollama n'a droit qu'au temps qu'il reste
+        return self._ollama(messages, delai, max_tokens, json_attendu, temperature)
+
+    def _gemini(self, messages, delai, max_tokens, json_attendu, temperature):
+        """Un appel à Gemini (generateContent). La clé voyage dans l'en-tête, jamais dans l'URL : une erreur ne la montre donc pas."""
+        systeme = "\n\n".join(m["content"] for m in messages if m["role"] == "system")
+        corps = {
+            "contents": [{"role": "model" if m["role"] == "assistant" else "user", "parts": [{"text": m["content"]}]}
+                         for m in messages if m["role"] != "system"],
+            # La réflexion de Gemini compte dans maxOutputTokens : une limite serrée donnerait des réponses vides.
+            # La longueur est tenue par la consigne (« 1 à 3 phrases ») et par nettoyer().
+            "generationConfig": {"temperature": temperature, "maxOutputTokens": max(10 * max_tokens, 1024)},
+        }
+        if systeme:
+            corps["systemInstruction"] = {"parts": [{"text": systeme}]}
+        if json_attendu:
+            corps["generationConfig"]["responseMimeType"] = "application/json"
+        reponse = requests.post(GEMINI_URL.format(modele=self.modele_gemini) + ":generateContent", json=corps,
+                                headers={"x-goog-api-key": self.cle_gemini}, timeout=delai)
+        if not reponse.ok:
+            raise requests.HTTPError(f"HTTP {reponse.status_code} : {detail_erreur(reponse)}", response=reponse)
+        try:
+            donnees = reponse.json()
+            candidat = (donnees.get("candidates") or [{}])[0]
+            parties = candidat.get("content", {}).get("parts", [])
+            texte = "".join(p.get("text", "") for p in parties if not p.get("thought")).strip()   # sans les pensées
+        except (ValueError, AttributeError, TypeError) as erreur:
+            raise requests.RequestException(f"réponse de Gemini illisible ({erreur})") from erreur
+        if not texte:
+            pourquoi = candidat.get("finishReason") or donnees.get("promptFeedback", {}).get("blockReason") or "réponse vide"
+            raise requests.RequestException(f"Gemini n'a rien répondu ({pourquoi})")
+        self._noter("ok")
+        return texte
+
+    def _ollama(self, messages, delai, max_tokens, json_attendu, temperature):
         """Un appel à Ollama (/api/chat). Lève requests.RequestException si Ollama ne répond pas."""
         messages = [dict(m) for m in messages]
         if self.modele.lower().startswith("qwen3"):
@@ -361,9 +450,17 @@ class IA:
 
     def repondre(self, historique, message, delai=120):
         """Réponse libre à un message, en se souvenant de l'historique [{"role", "content"}, ...]."""
-        systeme = AGENT.format(nom=self.nom, modele=self.modele, personnalite=self.personnalite)
+        systeme = AGENT.format(nom=self.nom, modele=self.modele_actif, personnalite=self.personnalite)
         messages = [{"role": "system", "content": systeme}, *historique, {"role": "user", "content": message}]
         return nettoyer(self.discuter(messages, delai, max_tokens=200), limite=800)
+
+
+def detail_erreur(reponse):
+    """Le message d'erreur de l'API Google (« API key not valid… », « model not found »…), plus parlant que le seul code HTTP."""
+    try:
+        return str(reponse.json()["error"]["message"])[:200]
+    except (ValueError, KeyError, TypeError):
+        return "pas de détail"
 
 
 def nettoyer(texte, limite=400):

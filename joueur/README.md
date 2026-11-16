@@ -22,6 +22,7 @@ Seul Ollama lui-même s'installe à la main (`curl -fsSL https://ollama.com/inst
 | `coordonnees`  |             | `[latitude, longitude]` : évite le géocodage (ville homonyme, pas de DNS)                         |
 | `broker`       |             | `{"hote": "amongus.local,10.109.150.215", "port": 1883}` : les hôtes sont essayés dans l'ordre    |
 | `ollama`       |             | `{"url": "http://127.0.0.1:11434", "modele": "qwen3:0.6b"}`                                      |
+| `gemini`       |             | `{"cle_api": "ta clé", "modele": "gemini-3.8-flash"}` : l'IA parle avec Gemini au lieu d'Ollama. Clé vide ou bloc absent : Ollama seul. Voir « Gemini » plus bas |
 | `personnalite` |             | le caractère de l'IA, en une ou deux phrases (« Tu es… »)                                         |
 | `strategie`    |             | `llm` (le LLM vote, valeur par défaut) ou `ecart` (calcul seul, le jeu de base du TP)              |
 | `memoire`      |             | `faits` (par défaut) ou `resume` : voir plus bas                                                 |
@@ -50,6 +51,21 @@ S'il redémarre en pleine partie, le maître lui renvoie son rôle et il reprend
 - **`llm`** : le LLM reçoit le tableau des mesures (avec « STABLE : écart constant » ou « INSTABLE : écart qui change » écrit en toutes lettres, car les petits modèles lisent mal les chiffres), le débat et ses souvenirs, puis répond en JSON. Si la réponse est inexploitable, il revient au calcul.
 
 Si Ollama ne répond pas ou si le modèle n'est pas installé, le joueur l'écrit dans son terminal dès le lancement, avec la commande à taper. Sa carte affiche alors « ⚠ LLM injoignable » ou « ⚠ modèle absent » dans l'interface. En attendant, l'IA dit une phrase de secours au débat et vote par calcul.
+
+## Gemini (optionnel)
+
+Avec une clé API Google, l'IA débat avec Gemini : ses répliques sont bien meilleures que celles d'un petit modèle local.
+
+```json
+"gemini": {"cle_api": "ta clé", "modele": "gemini-3.8-flash"}
+```
+
+- **Sans clé** (champ vide ou bloc absent) : Ollama seul, comme avant. Le nom du modèle change chez Google : vérifiez celui-ci dans leur documentation (les anciens `gemini-2.5-*` sont dépréciés).
+- **La clé reste dans `config.json`**, qui est ignoré par git : ne la commitez ni ne la partagez. Elle part dans un en-tête HTTP vers Google, jamais dans une URL, un journal, la présence MQTT ni `GET /agent`.
+- **Au lancement**, le joueur vérifie la clé et le modèle. Si Google les refuse, il l'écrit dans le terminal et continue avec Ollama.
+- **Pendant la partie**, si Gemini ne répond pas (coupure, quota dépassé, réponse bloquée) ou met plus de 30 s, la même demande part à Ollama : l'IA ne perd pas son tour. Ollama doit donc rester installé.
+- **Le vote** : `"strategie": "ecart"` garde le vote par calcul (le plus fiable) et laisse Gemini débattre. Avec `llm`, Gemini vote aussi, et le calcul reste le repli si sa réponse est inexploitable. `"memoire": "resume"` donne de bonnes notes entre les manches avec Gemini.
+- L'interface et `GET /agent` annoncent le modèle Gemini ; `GET /health` garde son champ `ollama`, qui reste celui du repli.
 
 ## Mémoire entre les manches
 
