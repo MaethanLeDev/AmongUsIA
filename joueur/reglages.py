@@ -10,8 +10,16 @@ import re
 import sys
 
 from ia import GEMINI_MODELE, IA
-from installation import (CARACTERES, NOM_MAX, VILLES, choisir_ville, demander, demarrer_ollama, modeles_installes,
-                          ollama_de_cette_machine)
+from installation import (
+    CARACTERES,
+    NOM_MAX,
+    VILLES,
+    choisir_ville,
+    demander,
+    demarrer_ollama,
+    modeles_installes,
+    ollama_de_cette_machine,
+)
 
 OLLAMA_LOCAL = "http://127.0.0.1:11434"
 COULEUR = re.compile(r"#[0-9a-fA-F]{6}")
@@ -60,10 +68,9 @@ def regler_llm(config):
         options += ["Gemini (API Google, clé nécessaire)", "Télécharger un autre modèle Ollama",
                     "Autre adresse Ollama (autre machine, ou passerelle vers une API)"]
         gemini, telechargement = len(installes), len(installes) + 1
+        actuel = local if installes else telechargement   # Entrée garde le LLM actuel
         if IA(config).fournisseur == "Gemini":
             actuel = gemini
-        else:
-            actuel = local if installes else telechargement
         choix = choisir("Quel LLM pour ton IA ?", options, actuel)
 
         if choix < gemini:
