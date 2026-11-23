@@ -1,5 +1,4 @@
 """Ce que le maître du jeu accepte ou refuse des messages MQTT reçus (votes, mesures, chat, présence)."""
-import pytest
 from aides import ID_PARTIE
 
 # --- Validation des votes -----------------------------------------------------
