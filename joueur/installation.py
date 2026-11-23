@@ -15,6 +15,7 @@ import subprocess
 import sys
 import time
 import unicodedata
+from urllib.parse import urlsplit
 
 import requests
 
@@ -33,6 +34,7 @@ CARACTERES = [
 ]
 COULEURS = ["#c1121f", "#1c7ed6", "#2f9e44", "#f08c00", "#7048e8", "#e64980", "#0c8599", "#5c940d"]
 NOM_MAX = 16                  # longueur affichée par l'interface
+PORT_OLLAMA = 11434           # là où « ollama serve » écoute : une autre adresse locale est une passerelle
 DEMARRAGE_OLLAMA = 15         # secondes laissées à « ollama serve » pour répondre
 TELECHARGEMENT_MAX = 3600     # secondes : un modèle de 500 Mo sur le Wi-Fi de l'IUT peut être long
 
@@ -116,10 +118,14 @@ def modeles_installes(url):
         return None
 
 
+def ollama_de_cette_machine(url):
+    adresse = urlsplit(url)
+    return adresse.hostname in ("127.0.0.1", "localhost") and adresse.port == PORT_OLLAMA
+
+
 def demarrer_ollama(url):
     """Ollama installé mais arrêté (souvent sous Linux sans service) : on lance « ollama serve » en arrière-plan."""
-    local = "127.0.0.1" in url or "localhost" in url
-    if not local or not shutil.which("ollama"):
+    if not ollama_de_cette_machine(url) or not shutil.which("ollama"):
         return None
     print("Ollama ne répond pas : démarrage de « ollama serve »…")
     subprocess.Popen(["ollama", "serve"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
@@ -163,6 +169,10 @@ def preparer_ollama(config, principal="Ollama"):
     if installes is None:
         if principal != "Ollama":
             print(f"Pas d'Ollama sur {url} : {principal} parlera, sans LLM de secours (le calcul prendra le relais).\n")
+            return
+        if not ollama_de_cette_machine(url):
+            print(f"Rien ne répond sur {url} : lance d'abord ta passerelle ou ton Ollama distant, ou change de LLM "
+                  "avec --reglages. Le joueur démarre quand même : en attendant, il votera par calcul.\n")
             return
         print("Ollama n'est pas installé ou ne démarre pas. Pour l'installer :\n"
               "  Raspberry Pi / Linux : curl -fsSL https://ollama.com/install.sh | sh\n"

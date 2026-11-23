@@ -10,7 +10,8 @@ import re
 import sys
 
 from ia import GEMINI_MODELE, IA
-from installation import CARACTERES, NOM_MAX, VILLES, choisir_ville, demander, demarrer_ollama, modeles_installes
+from installation import (CARACTERES, NOM_MAX, VILLES, choisir_ville, demander, demarrer_ollama, modeles_installes,
+                          ollama_de_cette_machine)
 
 OLLAMA_LOCAL = "http://127.0.0.1:11434"
 COULEUR = re.compile(r"#[0-9a-fA-F]{6}")
@@ -49,7 +50,8 @@ def regler_llm(config):
         if installes is None:
             installes = demarrer_ollama(url)
         if installes is None:
-            print(f"\nOllama ne répond pas sur {url}.")
+            passerelle = "" if ollama_de_cette_machine(url) else " (passerelle arrêtée ? lance-la, puis choisis ici « Autre adresse »)"
+            print(f"\nOllama ne répond pas sur {url}{passerelle}.")
             installes = []
         connus = {ollama["modele"], f"{ollama['modele']}:latest"}
         local = next((i for i, modele in enumerate(installes) if modele in connus), 0)   # sinon le premier installé

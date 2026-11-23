@@ -159,6 +159,32 @@ def test_gemini_sans_ollama_n_annonce_pas_un_vote_par_calcul(ollama, capsys):
     assert "Gemini parlera" in capsys.readouterr().out
 
 
+@pytest.mark.parametrize("url, attendu", [
+    ("http://127.0.0.1:11434", True),
+    ("http://localhost:11434", True),
+    ("http://127.0.0.1:11500", False),   # une passerelle vers une API : « ollama serve » ne la remplacerait pas
+    ("http://10.0.0.5:11434", False),
+])
+def test_seul_l_ollama_de_cette_machine_est_demarre(monkeypatch, url, attendu):
+    lances = []
+    monkeypatch.setattr(installation.shutil, "which", lambda programme: "/usr/bin/ollama")
+    monkeypatch.setattr(installation.subprocess, "Popen", lambda commande, **k: lances.append(commande))
+    monkeypatch.setattr(installation, "DEMARRAGE_OLLAMA", 0)
+
+    installation.demarrer_ollama(url)
+
+    assert bool(lances) is attendu
+
+
+def test_passerelle_arretee_le_dit(ollama, capsys):
+    ollama.installes = None
+
+    installation.preparer_ollama({"ollama": {"url": "http://127.0.0.1:11500", "modele": "openai/gpt-oss-120b"}})
+
+    assert "passerelle" in capsys.readouterr().out
+    assert ollama.pulls == []
+
+
 def test_telechargement_refuse_par_ollama(ollama, capsys):
     ollama.etapes = [{"error": "pull model manifest: file does not exist"}]
 
