@@ -83,7 +83,10 @@ def demarrer_api(joueur, port):
                 if self.path == "/discuter":
                     if not str(corps.get("avec", "")).startswith("http"):
                         return self.envoyer(400, {"erreur": "champ \"avec\" : URL de l'autre agent (http://ip:port)"})
-                    tours = max(1, min(int(corps.get("tours", 3)), MAX_TOURS))
+                    try:
+                        tours = max(1, min(int(corps.get("tours", 3)), MAX_TOURS))
+                    except (TypeError, ValueError):   # "tours": null, "trois"…
+                        return self.envoyer(400, {"erreur": "champ \"tours\" : un nombre entier"})
                     sujet = str(corps.get("sujet") or "la météo de vos villes")
                     return self.envoyer(200, {"echanges": discuter(corps["avec"], sujet, tours)})
             except (requests.RequestException, ValueError, KeyError) as erreur:

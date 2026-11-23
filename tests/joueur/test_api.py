@@ -206,10 +206,8 @@ def test_discuter_autre_agent_injoignable(serveur, monkeypatch):
 
 
 def test_discuter_tours_invalide(serveur, autre_agent):
-    assert appeler(serveur, "/discuter", {"avec": "http://10.0.0.7:5000", "tours": "beaucoup"})[0] == 502
+    assert appeler(serveur, "/discuter", {"avec": "http://10.0.0.7:5000", "tours": "beaucoup"})[0] == 400
 
 
-@pytest.mark.xfail(reason="bug : \"tours\": null lève une TypeError non attrapée, le client n'a aucune réponse",
-                   raises=(urllib.error.URLError, ConnectionError))
 def test_discuter_tours_nul_renvoie_une_erreur(serveur, autre_agent):
     assert appeler(serveur, "/discuter", {"avec": "http://10.0.0.7:5000", "tours": None})[0] in (400, 502)

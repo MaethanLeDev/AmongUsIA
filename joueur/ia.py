@@ -103,6 +103,16 @@ class Manche:
         self.debat = []       # (id, texte), dans l'ordre
         self.votes = {}       # votant -> suspect
         self.verdict = None   # message iot/partie/verdict
+        self.recus = set()    # (topic, echange ou tour) déjà pris en compte : un message QoS 1 peut arriver deux fois
+
+    def premiere_fois(self, topic, numero):
+        """Vrai si ce message (mesure d'un échange, réplique d'un tour) n'a pas déjà été reçu. Sans numéro, on ne peut pas savoir."""
+        if numero is None:
+            return True
+        if (topic, numero) in self.recus:
+            return False
+        self.recus.add((topic, numero))
+        return True
 
 
 class Partie:
@@ -592,8 +602,13 @@ def lire_vote(brut, candidats):
         brut = suspect
     except (ValueError, AttributeError):
         pass  # JSON coupé ou invalide : on cherche un nom dans le texte brut
-    # Le nom le plus long d'abord, pour ne pas confondre rpi1 et rpi10
-    for id_joueur, nom in sorted(candidats.items(), key=lambda c: -len(c[0])):
-        if id_joueur in brut or nom.lower() in brut.lower():
+    # Mots entiers : « rpi10 » (soi-même, un éliminé) ne doit pas compter comme un vote contre rpi1
+    for id_joueur, nom in candidats.items():
+        if cite(id_joueur, brut) or cite(nom, brut):
             return id_joueur, raison[:200]
     return None, ""
+
+
+def cite(mot, texte):
+    """Le mot apparaît-il en entier dans le texte (sans casse), pas comme morceau d'un autre id ou nom ?"""
+    return bool(mot) and re.search(rf"(?<![\w-]){re.escape(mot)}(?![\w-])", texte, re.IGNORECASE) is not None

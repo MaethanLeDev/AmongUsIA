@@ -43,7 +43,7 @@ class Meteo:
                                                "current": "temperature_2m"}, timeout=10)
                 reponse.raise_for_status()
                 self.derniere = reponse.json()["current"]["temperature_2m"]
-            except (requests.RequestException, KeyError, ValueError) as erreur:
+            except (requests.RequestException, KeyError, TypeError, ValueError) as erreur:   # TypeError : "current": null
                 print(f"  Météo indisponible ({erreur}), on garde la dernière valeur")
             return self.derniere
 

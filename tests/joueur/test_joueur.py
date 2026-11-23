@@ -248,13 +248,12 @@ def test_temperature_qui_n_est_pas_un_nombre_ignoree(en_partie, annoncer_phase):
     assert votes(j)[0]["calcul"] != "rpi3"
 
 
-@pytest.mark.xfail(reason="bug : une mesure reçue deux fois (QoS 1) est ajoutée deux fois ; les échanges suivants "
-                          "sont décalés et le calcul accuse un capteur honnête")
 def test_mesure_recue_deux_fois_ne_fausse_pas_le_calcul(en_partie, annoncer_phase):
-    # Les températures montent pour tout le monde ; rpi4 est décalé de 0,6 °C (l'espion)
+    # Les températures montent pour tout le monde ; rpi4 (l'espion) s'écarte de ±0,3 °C, moins que le décalage
+    # d'un degré qu'un doublon donnerait à rpi3
     j = en_partie()
     honnete = [11.0, 12.0, 13.0, 14.0, 15.0]
-    publier_mesures(j, {"rpi2": honnete, "rpi4": [v + 0.6 for v in honnete]})
+    publier_mesures(j, {"rpi2": honnete, "rpi4": [v + d for v, d in zip(honnete, [0.3, -0.3, 0.3, -0.3, 0.3], strict=True)]})
     j.client.injecter(*mesure("rpi3", honnete[0], echange=1))   # premier échange de rpi3 reçu en double
     publier_mesures(j, {"rpi3": honnete})
 
@@ -281,7 +280,6 @@ def test_replique_d_une_autre_partie_pas_transmise_au_llm(en_partie, llm):
     assert "Vieux message." not in llm.prompts()[-1]
 
 
-@pytest.mark.xfail(reason="bug : une réplique reçue deux fois (QoS 1) apparaît deux fois dans le débat montré au LLM")
 def test_replique_recue_deux_fois_transmise_une_fois(en_partie, llm):
     j = en_partie()
     message = {"text": "Kaito ment.", "partie": ID_PARTIE, "manche": 1, "tour": 1}
@@ -808,8 +806,6 @@ def test_config_liste_toutes_les_erreurs_d_un_coup(ecrire_config):
     assert all(champ in str(erreur.value) for champ in ('"id"', '"ville"', '"strategie"'))
 
 
-@pytest.mark.xfail(reason="bug : un config.json qui n'est pas un objet JSON (ex : []) donne une trace "
-                          "AttributeError au lieu d'un message clair")
 def test_config_qui_n_est_pas_un_objet(ecrire_config):
     with pytest.raises(SystemExit):
         joueur.lire_config(ecrire_config("[]"))

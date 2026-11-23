@@ -140,8 +140,6 @@ def test_lire_vote_ne_confond_pas_rpi1_et_rpi10():
     assert ia.lire_vote("rpi10 est louche", {"rpi1": "rpi1", "rpi10": "rpi10"})[0] == "rpi10"
 
 
-@pytest.mark.xfail(reason="bug : recherche par sous-chaîne ; un id absent des candidats (soi-même, un éliminé) "
-                          "qui en contient un autre (rpi10 ⊃ rpi1) donne un vote contre rpi1 au lieu du repli sur le calcul")
 def test_lire_vote_id_non_candidat_qui_en_contient_un_autre_ne_donne_rien():
     # rpi10 vote pour lui-même : il n'est pas candidat, la réponse est inexploitable
     assert ia.lire_vote('{"suspect": "rpi10", "raison": "moi"}', {"rpi1": "rpi1", "rpi2": "rpi2"}) == (None, "")
