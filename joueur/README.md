@@ -6,8 +6,15 @@ Le même code tourne sur toutes les machines. Seul `config.json` change : chacun
 uv run joueur/joueur.py                          # ou : uv run joueur/joueur.py autre_config.json
 ```
 
+Sans cloner le dépôt (la config est alors `~/.amongusia/config.json`, voir `jouer.py` à la racine) :
+
+```bash
+uv run https://raw.githubusercontent.com/MaethanLeDev/AmongUsIA/main/jouer.py
+```
+
 Au premier lancement (`installation.py`) :
-- s'il n'y a pas de `config.json`, trois questions (nom de l'IA, ville, caractère ; Entrée garde la proposition) l'écrivent. L'`id` vient du nom, l'apparence est tirée au sort. Lancé sans terminal (service systemd), tout est tiré au sort ;
+- s'il n'y a pas de `config.json`, trois questions (nom de l'IA, ville, caractère ; Entrée garde la proposition) l'écrivent. L'`id` vient du nom (le nom proposé est numéroté pour que deux joueurs n'aient pas le même), l'apparence est tirée au sort. Lancé sans terminal (service systemd), tout est tiré au sort ;
+- puis un menu (`reglages.py`) fait choisir le LLM parmi les modèles déjà installés, Gemini ou une autre adresse Ollama, et propose tous les autres réglages. **`--reglages` le rouvre** à n'importe quel lancement ; sans cette option, les lancements suivants ne posent aucune question ;
 - si Ollama est installé mais ne répond pas, il lance `ollama serve` ;
 - si le modèle n'est pas installé, il le télécharge (`/api/pull`, comme `ollama pull`), avec la progression.
 
@@ -23,6 +30,7 @@ Seul Ollama lui-même s'installe à la main (`curl -fsSL https://ollama.com/inst
 | `broker`       |             | `{"hote": "amongus.local,10.109.150.215", "port": 1883}` : les hôtes sont essayés dans l'ordre    |
 | `ollama`       |             | `{"url": "http://127.0.0.1:11434", "modele": "qwen3:0.6b"}`                                      |
 | `gemini`       |             | `{"cle_api": "ta clé", "modele": "gemini-3.8-flash"}` : l'IA parle avec Gemini au lieu d'Ollama. Clé vide ou bloc absent : Ollama seul. Voir « Gemini » plus bas |
+| `fournisseur`  |             | `ollama` ou `gemini`, écrit par le menu : `ollama` fait parler le modèle local sans effacer la clé Gemini. Absent : Gemini s'il y a une clé |
 | `personnalite` |             | le caractère de l'IA, en une ou deux phrases (« Tu es… »)                                         |
 | `strategie`    |             | `llm` (le LLM vote, valeur par défaut) ou `ecart` (calcul seul, le jeu de base du TP)              |
 | `meteo`        |             | `reelle` (par défaut : la température actuelle) ou `historique` : voir « Météo historique » plus bas. **À régler pareil sur tous les Pi** |
@@ -62,6 +70,7 @@ Avec une clé API Google, l'IA débat avec Gemini : ses répliques sont bien mei
 "gemini": {"cle_api": "ta clé", "modele": "gemini-3.8-flash"}
 ```
 
+- **Le plus simple** : `--reglages`, puis « LLM ». Avec `"fournisseur": "ollama"`, la clé est gardée mais inutilisée.
 - **Sans clé** (champ vide ou bloc absent) : Ollama seul, comme avant. Le nom du modèle change chez Google : vérifiez celui-ci dans leur documentation (les anciens `gemini-2.5-*` sont dépréciés).
 - **La clé reste dans `config.json`**, qui est ignoré par git : ne la commitez ni ne la partagez. Elle part dans un en-tête HTTP vers Google, jamais dans une URL, un journal, la présence MQTT ni `GET /agent`.
 - **Au lancement**, le joueur vérifie la clé et le modèle. Si Google les refuse, il l'écrit dans le terminal et continue avec Ollama.

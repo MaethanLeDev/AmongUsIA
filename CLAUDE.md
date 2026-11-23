@@ -16,7 +16,7 @@ Les modules ne communiquent **que** par MQTT, avec les topics et champs de `docs
 | Dossier | Langage | Responsable | Point d'entrée |
 |---|---|---|---|
 | `broker/` | Mosquitto (Docker) | Niels | `docker compose up -d` |
-| `joueur/` | Python | Maethan | `joueur.py` (+ `ia.py` LLM, `meteo.py` Open-Meteo, `api.py` HTTP port 5000, `discuter.py`) |
+| `joueur/` | Python | Maethan | `joueur.py` (+ `ia.py` LLM, `reglages.py` menu `--reglages`, `meteo.py` Open-Meteo, `api.py` HTTP port 5000, `discuter.py`) |
 | `maitre_du_jeu/` | Python | Maethan | `maitre.py` : l'arbitre, seul à faire avancer les phases |
 | `interface/` | Node.js ≥ 18, Three.js | Valérian | `server.js` (HTTP + WebSocket maison), `spectacle.js` (état reconstruit), `public/` (3D) |
 | `outils/` | Python | | `simulation.py`, `broker_dev.py`, `faux_ollama.py` : tester sur un seul PC |
@@ -30,9 +30,10 @@ uv sync                                               # une fois, à la racine
 uv run outils/simulation.py --joueurs 3 --rapide      # partie complète sans Pi ni Ollama (skill /simulation)
 uv run serveur.py                                     # côté serveur en une commande : broker si besoin, interface, maître
 uv run maitre_du_jeu/maitre.py --tp                   # mode exact du sujet : 1 manche, pas de débat, majorité
+uv run jouer.py                                       # joueur sans clone (aussi par URL) : télécharge joueur/ de main dans ~/.amongusia
 uv run joueur/joueur.py [config.json]                 # crée config.json et prépare Ollama au premier lancement
 cd interface && node server.js                        # MQTT_HOST=localhost pour la simulation ; http://localhost:5050, /api/etat
-uv run python -m py_compile serveur.py joueur/*.py maitre_du_jeu/*.py outils/*.py   # vérif syntaxe
+uv run python -m py_compile serveur.py jouer.py joueur/*.py maitre_du_jeu/*.py outils/*.py   # vérif syntaxe
 node --check interface/server.js                      # idem côté Node
 uv run pytest -q                                      # tests unitaires Python (quelques secondes)
 node --test "interface/tests/*.test.js"               # tests de l'interface

@@ -49,10 +49,30 @@ Il lance ensuite l'interface si Node.js est installé, puis le maître du jeu au
 Ses options inconnues vont au maître : `uv run serveur.py --tp`, `uv run serveur.py --tours 3`. Autres options : `--broker <ip>` (ne cherche pas, n'en démarre pas), `--sans-interface`.
 Un seul serveur par broker : deux maîtres du jeu se déconnectent l'un l'autre.
 
+**Joueur sans le dépôt** : ni git, ni clone, ni compte GitHub, il suffit d'avoir uv.
+
+```bash
+uv run https://raw.githubusercontent.com/MaethanLeDev/AmongUsIA/main/jouer.py
+```
+
+- `jouer.py` récupère le dossier `joueur/` de `main` à chaque lancement et le range dans `~/.amongusia/code/` (ne rien y modifier, c'est remplacé).
+- La config est `~/.amongusia/config.json`, jamais remplacée. Pour en utiliser une autre, ajouter son chemin à la fin de la commande.
+- Un changement du joueur n'arrive chez les joueurs qu'une fois fusionné dans `main`.
+- Pour pouvoir jouer sans Internet : enregistrer `jouer.py` (`curl -LO https://raw.githubusercontent.com/MaethanLeDev/AmongUsIA/main/jouer.py`), le lancer une fois connecté, puis `uv run jouer.py`.
+
 **Côté joueur**, seul [Ollama](https://ollama.com/download) s'installe à la main, une fois (`curl -fsSL https://ollama.com/install.sh | sh` sur un Pi).
 Au premier lancement, le joueur demande le nom de son IA, sa ville et son caractère (Entrée garde la proposition), et écrit `joueur/config.json`.
 Si Ollama est installé mais arrêté, il le démarre ; si le modèle manque, il le télécharge (une seule fois, quelques minutes).
-Sans Ollama, il démarre quand même et vote par calcul. Pour changer de réglages : modifier `joueur/config.json`, ou le supprimer et relancer.
+Sans Ollama ni API, il démarre quand même et vote par calcul.
+
+**Choisir son LLM et ses réglages** : le menu s'ouvre au premier lancement, puis à la demande en ajoutant `--reglages` à la commande (avec ou sans le dépôt).
+
+- Les modèles déjà installés dans Ollama sont listés : on tape leur numéro, rien n'est retéléchargé.
+- « Gemini » demande la clé (elle ne s'affiche pas) ; le modèle du Pi reste en secours. Revenir au modèle du Pi ne l'efface pas.
+- « Autre adresse Ollama » sert à un Ollama sur une autre machine, ou à une passerelle qui fait passer une API pour un Ollama (elle doit déjà tourner).
+- Le même menu règle le vote, le nom, la ville, le caractère, l'apparence, la mémoire, la météo, l'identifiant, le broker et le port de l'API.
+
+`config.json` reste modifiable à la main.
 
 Les morceaux se lancent aussi séparément : `cd broker && docker compose up -d`, `uv run maitre_du_jeu/maitre.py`, `node interface/server.js`.
 
@@ -90,6 +110,8 @@ Le premier lancement l'écrit tout seul ; on peut ensuite l'adapter (ou partir d
 | `ville`         | une ville **voisine** des autres (Annecy, Seynod, Sévrier…)                     | la température publiée                            |
 | `coordonnees`   | `[45.886, 6.089]`                                                               | remplace le géocodage de la ville                 |
 | `ollama.modele` | tout modèle installé (`ollama list`)                                            | le cerveau de l'IA                                |
+| `fournisseur`   | `ollama` ou `gemini`                                                            | `ollama` : le modèle local, même si une clé Gemini est enregistrée |
+| `gemini`        | `{"cle_api": "…", "modele": "…"}`                                               | l'API Gemini, avec Ollama en secours              |
 | `personnalite`  | une ou deux phrases « Tu es… »                                                  | sa façon de débattre                              |
 | `strategie`     | `llm` (défaut) ou `ecart`                                                       | vote par le LLM, ou par le calcul seul            |
 | `meteo`         | `reelle` (défaut) ou `historique`                                               | `historique` : chaque mesure est un jour et une heure au hasard des 3 dernières années, mois annoncé. **À régler pareil sur tous les Pi** |

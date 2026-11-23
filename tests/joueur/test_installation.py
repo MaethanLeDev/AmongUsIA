@@ -90,6 +90,29 @@ def test_config_reprend_les_reponses(tmp_path, monkeypatch):
     assert config["personnalite"] == "Tu es paranoïaque."
 
 
+def test_entree_fermee_tire_la_config_au_sort(tmp_path, monkeypatch):
+    def fermee(question):
+        raise EOFError
+
+    monkeypatch.setattr("builtins.input", fermee)
+    monkeypatch.setattr(installation.sys, "stdin", SimpleNamespace(isatty=lambda: True))   # NUL, sous Windows
+    chemin = tmp_path / "config.json"
+
+    installation.creer_config(chemin)
+
+    assert joueur.lire_config(chemin)["ville"] in installation.VILLES
+
+
+def test_nom_propose_numerote_pour_un_id_unique(tmp_path, monkeypatch):
+    monkeypatch.setattr(installation.sys, "stdin", None)
+    monkeypatch.setattr(installation.random, "randint", lambda debut, fin: 427)
+    chemin = tmp_path / "config.json"
+
+    installation.creer_config(chemin)
+
+    assert json.loads(chemin.read_text(encoding="utf-8"))["id"].endswith("427")
+
+
 def test_ville_hors_liste_sans_coordonnees():
     config = installation.nouvelle_config("Kuro", "Chambéry")
 
@@ -125,6 +148,40 @@ def test_ollama_absent_explique_comment_l_installer(ollama, capsys):
     installation.preparer_ollama(config_ollama())
 
     assert "ollama.com/install.sh" in capsys.readouterr().out
+    assert ollama.pulls == []
+
+
+def test_gemini_sans_ollama_n_annonce_pas_un_vote_par_calcul(ollama, capsys):
+    ollama.installes = None
+
+    installation.preparer_ollama(config_ollama(), "Gemini")
+
+    assert "Gemini parlera" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("url, attendu", [
+    ("http://127.0.0.1:11434", True),
+    ("http://localhost:11434", True),
+    ("http://127.0.0.1:11500", False),   # une passerelle vers une API : « ollama serve » ne la remplacerait pas
+    ("http://10.0.0.5:11434", False),
+])
+def test_seul_l_ollama_de_cette_machine_est_demarre(monkeypatch, url, attendu):
+    lances = []
+    monkeypatch.setattr(installation.shutil, "which", lambda programme: "/usr/bin/ollama")
+    monkeypatch.setattr(installation.subprocess, "Popen", lambda commande, **k: lances.append(commande))
+    monkeypatch.setattr(installation, "DEMARRAGE_OLLAMA", 0)
+
+    installation.demarrer_ollama(url)
+
+    assert bool(lances) is attendu
+
+
+def test_passerelle_arretee_le_dit(ollama, capsys):
+    ollama.installes = None
+
+    installation.preparer_ollama({"ollama": {"url": "http://127.0.0.1:11500", "modele": "openai/gpt-oss-120b"}})
+
+    assert "passerelle" in capsys.readouterr().out
     assert ollama.pulls == []
 
 

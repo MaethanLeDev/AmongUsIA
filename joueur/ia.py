@@ -1,6 +1,6 @@
 """Le cerveau d'un joueur : il débat, vote et se souvient des manches passées, avec un LLM.
 
-Le LLM est Gemini si config.json contient une clé ("gemini": {"cle_api": ...}), Ollama sinon.
+Le LLM est Gemini si config.json contient une clé ("gemini": {"cle_api": ...}), sauf "fournisseur": "ollama" ; Ollama sinon.
 Ollama reste le repli de Gemini : une panne ou un quota dépassé ne fait pas perdre son tour de parole.
 Tout ce qui se personnalise (modèle, personnalité, mémoire) vient de config.json.
 """
@@ -280,6 +280,8 @@ class IA:
         self.modele = config["ollama"]["modele"]
         gemini = config.get("gemini") or {}
         self.cle_gemini = str(gemini.get("cle_api") or "").strip()   # vide : Gemini désactivé, Ollama seul
+        if config.get("fournisseur") == "ollama":   # choix du modèle local : la clé reste dans config.json, inutilisée
+            self.cle_gemini = ""
         self.modele_gemini = gemini.get("modele") or GEMINI_MODELE
         self.gemini_utilisable = True   # passe à False si Google refuse la clé ou ne connaît pas le modèle : inutile d'insister
         self.strategie = config.get("strategie", "llm")
