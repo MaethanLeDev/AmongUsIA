@@ -47,6 +47,7 @@ class MaitreDuJeu:
         self.manche = 0
         self.manches_max = 0
         self.mesures = Counter()   # id -> nombre de températures reçues pendant la manche
+        self.echanges_vus = set()  # (id, echange) déjà comptés : un message QoS 1 peut arriver deux fois
         self.parole = None         # id du joueur qui a la parole
         self.reponse = None        # ce qu'il a dit
         self.vote_ouvert = False
@@ -98,6 +99,11 @@ class MaitreDuJeu:
         with self.cond:
             id_joueur = msg.topic.split("/")[2]
             if id_joueur in self.vivants and self.de_cette_manche(mesure):
+                echange = mesure.get("echange")
+                if echange is not None:   # sans numéro d'échange (client minimal), on ne peut pas repérer un doublon
+                    if (id_joueur, echange) in self.echanges_vus:
+                        return
+                    self.echanges_vus.add((id_joueur, echange))
                 self.mesures[id_joueur] += 1
                 self.cond.notify_all()
 
@@ -254,6 +260,7 @@ class MaitreDuJeu:
         print(f"\n=== MESURES === ({echanges} échanges de {DUREE_ECHANGE} s)")
         with self.cond:
             self.mesures.clear()
+            self.echanges_vus.clear()
         self.publier_etat("mesures", fin=time.time() + delai, echanges=echanges)
         if not self.attendre(lambda: all(self.mesures[i] >= echanges for i in self.vivants_en_ligne()), delai):
             print("  Certains capteurs n'ont pas fini leurs mesures, on continue.")
@@ -400,12 +407,20 @@ def connecter(client, hotes, port):
     sys.exit("Aucun broker joignable : vérifie --broker et que le broker est lancé (voir broker/README.md).")
 
 
+def meme_forme(valeur, modele):
+    """Mêmes clés à tous les niveaux, et des nombres là où le modèle en a : un stats.json abîmé ne fait pas planter la fin de partie."""
+    if isinstance(modele, dict):
+        return isinstance(valeur, dict) and valeur.keys() == modele.keys() and all(
+            meme_forme(valeur[cle], modele[cle]) for cle in modele)
+    return isinstance(valeur, int) and not isinstance(valeur, bool)
+
+
 def charger_stats(fichier):
     vides = {"parties": 0, "victoires": {"capteurs": 0, "espion": 0},
              "votes": {"llm": {"total": 0, "justes": 0}, "calcul": {"total": 0, "justes": 0}}}
     try:
         stats = json.loads(Path(fichier).read_text(encoding="utf-8"))
-        return stats if stats.keys() == vides.keys() else vides
+        return stats if meme_forme(stats, vides) else vides
     except (OSError, ValueError):
         return vides
 

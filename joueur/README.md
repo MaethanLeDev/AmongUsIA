@@ -50,7 +50,7 @@ Une erreur dans `config.json` est signalée clairement au lancement.
    - **débat** : quand le maître lui donne la parole (`iot/partie/parole`), son LLM répond aux autres (`iot/chat/<id>`). Il entend tout ce qui se dit.
    - **vote** : il désigne un suspect (`iot/votes/<id>`). Le message contient aussi le suspect de la méthode de calcul, pour la comparaison demandée par le TP.
 
-Il ne lance chaque action qu'une fois, même si un message retenu lui parvient deux fois (reconnexion), et ignore les messages d'une partie précédente.
+Il ne lance chaque action qu'une fois, même si un message retenu lui parvient deux fois (reconnexion), ne garde qu'une fois une mesure (même `echange`) ou une réplique (même `tour`) reçue en double, et ignore les messages d'une partie précédente.
 S'il redémarre en pleine partie, le maître lui renvoie son rôle et il reprend à la phase en cours.
 
 ## Stratégies

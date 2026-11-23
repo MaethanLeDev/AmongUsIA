@@ -31,8 +31,6 @@ def test_stats_avec_d_autres_cles_donne_des_stats_vides(tmp_path):
     assert maitre.charger_stats(fichier) == STATS_VIDES
 
 
-@pytest.mark.xfail(reason="bug : seules les clés de premier niveau sont vérifiées ; "
-                          "\"votes\": {} est accepté et le maître plante (KeyError) à la fin de la partie")
 def test_stats_incompletes_donnent_des_stats_vides(tmp_path):
     fichier = tmp_path / "stats.json"
     fichier.write_text(json.dumps({"parties": 2, "victoires": {}, "votes": {}}), encoding="utf-8")

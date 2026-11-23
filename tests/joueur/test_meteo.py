@@ -113,8 +113,6 @@ def test_erreur_http_garde_la_derniere_valeur(open_meteo, monkeypatch):
     assert ville.temperature() == 12.4
 
 
-@pytest.mark.xfail(reason="bug : \"current\": null lève une TypeError non attrapée, qui arrête le thread de mesure",
-                   raises=TypeError)
 def test_reponse_current_nulle_ne_plante_pas(monkeypatch):
     monkeypatch.setattr(meteo.requests, "get", lambda url, params=None, timeout=None: FausseReponseHTTP({"current": None}))
 

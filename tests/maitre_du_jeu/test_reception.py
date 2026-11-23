@@ -1,5 +1,4 @@
 """Ce que le maître du jeu accepte ou refuse des messages MQTT reçus (votes, mesures, chat, présence)."""
-import pytest
 from aides import ID_PARTIE
 
 # --- Validation des votes -----------------------------------------------------
@@ -145,7 +144,6 @@ def test_mesure_d_un_elimine_est_ignoree(en_partie):
     assert m.mesures["rpi2"] == 0
 
 
-@pytest.mark.xfail(reason="bug : une mesure reçue deux fois (QoS 1) est comptée deux fois, la phase peut finir trop tôt")
 def test_mesure_recue_deux_fois_n_est_comptee_qu_une_fois(en_partie):
     m = en_partie()
     mesure = {"temperature": 12.4, "echange": 1, "manche": 1, "partie": ID_PARTIE}
@@ -154,6 +152,17 @@ def test_mesure_recue_deux_fois_n_est_comptee_qu_une_fois(en_partie):
     m.client.injecter("iot/capteurs/rpi1/temperature", mesure)
 
     assert m.mesures["rpi1"] == 1
+
+
+def test_mesures_sans_numero_d_echange_toutes_comptees(en_partie):
+    # Un client minimal du TP n'envoie pas "echange" : on ne peut pas repérer ses doublons, on compte tout
+    m = en_partie()
+    mesure = {"temperature": 12.4, "manche": 1, "partie": ID_PARTIE}
+
+    m.client.injecter("iot/capteurs/rpi1/temperature", mesure)
+    m.client.injecter("iot/capteurs/rpi1/temperature", mesure)
+
+    assert m.mesures["rpi1"] == 2
 
 
 # --- Chat ---------------------------------------------------------------------

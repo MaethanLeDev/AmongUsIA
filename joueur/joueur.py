@@ -175,6 +175,8 @@ class Joueur:
         with self.verrou:
             if self.de_la_partie(mesure) and isinstance(temperature, (int, float)):
                 manche = self.partie.manche(mesure.get("manche"))
+                if not manche.premiere_fois(msg.topic, mesure.get("echange")):
+                    return   # doublon : l'ajouter décalerait les échanges suivants
                 id_capteur = msg.topic.split("/")[2]
                 mois = mesure.get("mois")   # annoncé seulement en mode météo « historique »
                 manche.mesures.setdefault(id_capteur, []).append(temperature)
@@ -185,7 +187,9 @@ class Joueur:
         texte = message.get("text")
         with self.verrou:
             if self.de_la_partie(message) and isinstance(texte, str):
-                self.partie.manche(message.get("manche")).debat.append((expediteur(msg), texte))
+                manche = self.partie.manche(message.get("manche"))
+                if manche.premiere_fois(msg.topic, message.get("tour")):
+                    manche.debat.append((expediteur(msg), texte))
 
     def _on_vote(self, client, userdata, msg):
         vote = lire_json(msg.payload)
@@ -405,6 +409,8 @@ def lire_config(chemin):
         config = json.loads(chemin.read_text(encoding="utf-8"))
     except ValueError as erreur:
         sys.exit(f"{chemin} n'est pas du JSON valide : {erreur}")
+    if not isinstance(config, dict):
+        sys.exit(f"{chemin} doit contenir un objet JSON {{ ... }} (voir joueur/config.example.json)")
     erreurs = []
     id_joueur = config.get("id")
     if not isinstance(id_joueur, str) or not id_joueur or any(c in id_joueur for c in " /+#"):
