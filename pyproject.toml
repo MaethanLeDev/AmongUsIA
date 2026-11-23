@@ -26,7 +26,7 @@ select = ["E", "F", "W", "B", "UP", "SIM", "I"]
 ignore = ["SIM105"]   # try/except/pass est accepté, plus lisible pour le groupe que contextlib.suppress
 
 [tool.ruff.lint.isort]
-known-first-party = ["api", "ia", "installation", "meteo"]   # modules de joueur/, importés directement
+known-first-party = ["api", "ia", "installation", "meteo", "reglages"]   # modules de joueur/, importés directement
 
 [dependency-groups]
 dev = [

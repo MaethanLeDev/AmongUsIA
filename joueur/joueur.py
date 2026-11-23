@@ -4,10 +4,12 @@ Le même script tourne sur toutes les machines. Tout ce qui se personnalise est 
 ville, modèle Ollama ou Gemini, personnalité, mémoire, nom et apparence dans l'interface.
 Il expose aussi l'API HTTP de l'agent du TP « RPi & Ollama » (voir api.py).
 
-Usage : uv run joueur/joueur.py [chemin/vers/config.json]
-Au premier lancement, config.json est créé en trois questions, et Ollama et son modèle sont préparés (installation.py).
+Usage : uv run joueur/joueur.py [chemin/vers/config.json] [--reglages]
+Au premier lancement, config.json est créé, on choisit son LLM (reglages.py), et Ollama est préparé (installation.py).
+--reglages rouvre le menu pour changer de LLM ou de réglages.
 Protocole : docs/protocole.md
 """
+import argparse
 import copy
 import json
 import random
@@ -22,8 +24,9 @@ import paho.mqtt.client as mqtt
 
 from api import demarrer_api
 from ia import IA, Partie
-from installation import creer_config, preparer_ollama
+from installation import corriger_coordonnees, creer_config, preparer_ollama
 from meteo import Meteo
+from reglages import decrire_llm, regler
 
 DUREE_ECHANGE = 5             # secondes entre deux températures, fixé par le sujet
 ECART_ESPION = (0.05, 0.10)   # l'espion décale la moyenne des autres de 5 à 10 %, vers le haut ou le bas
@@ -430,11 +433,19 @@ def lire_config(chemin):
 def main():
     sys.stdout.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)  # visibles tout de suite, même redirigés
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
-    chemin = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(__file__).with_name("config.json")
-    if not chemin.exists():
-        creer_config(chemin)
-    config = lire_config(chemin)
-    preparer_ollama(config)
+    parser = argparse.ArgumentParser(description="Un joueur : un capteur piloté par une IA")
+    parser.add_argument("config", nargs="?", type=Path, default=Path(__file__).with_name("config.json"))
+    parser.add_argument("--reglages", action="store_true", help="choisir son LLM et changer ses réglages avant de jouer")
+    args = parser.parse_args()
+    premiere = not args.config.exists()
+    if premiere:
+        creer_config(args.config)
+    config = lire_config(args.config)
+    corriger_coordonnees(config)
+    if premiere or args.reglages:
+        regler(args.config, config, premiere)
+    print(f"LLM : {decrire_llm(config)}. Pour en changer : même commande avec --reglages")
+    preparer_ollama(config, IA(config).fournisseur)
     Joueur(config).lancer()
 
 

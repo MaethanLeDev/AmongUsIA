@@ -64,12 +64,27 @@ Les règles complètes sont dans [docs/protocole.md](docs/protocole.md#règles).
 Une seule fois sur chaque machine Python : installer [uv](https://docs.astral.sh/uv/) (`curl -LsSf https://astral.sh/uv/install.sh | sh` sur un Pi). Pas besoin de `uv sync` : `uv run` installe ce qui manque.
 uv télécharge lui-même Python 3.14 (version fixée par `.python-version`), sans toucher au Python du système : il faut juste un accès Internet la première fois.
 
-Ensuite, une commande de chaque côté :
+**Pour seulement jouer, pas besoin de cloner le dépôt** : avec uv installé, cette commande suffit, la même à chaque partie.
+
+```bash
+uv run https://raw.githubusercontent.com/MaethanLeDev/AmongUsIA/main/jouer.py
+```
+
+Au premier lancement, on choisit son LLM (un modèle déjà installé sur la machine, Gemini, ou une autre adresse Ollama).
+Pour en changer, ou changer n'importe quel réglage, la même commande avec `--reglages` :
+
+```bash
+uv run https://raw.githubusercontent.com/MaethanLeDev/AmongUsIA/main/jouer.py --reglages
+```
+
+Elle ne garde que le code du joueur, dans `~/.amongusia/code/`, à jour de `main`, et la config dans `~/.amongusia/config.json`.
+
+Avec le dépôt cloné, une commande de chaque côté :
 
 | Où | Commande | Ce qu'elle fait |
 |----|----------|-----------------|
 | **Serveur** (Pi du broker) | `uv run serveur.py` | trouve le broker (ou démarre celui de `broker/`), lance l'interface 3D et le maître du jeu |
-| **Chaque joueur** | `uv run joueur/joueur.py` | au premier lancement : 3 questions (nom, ville, caractère) qui écrivent `joueur/config.json`, démarre Ollama et télécharge le modèle s'il manque |
+| **Chaque joueur** | `uv run joueur/joueur.py` | au premier lancement : nom, ville, caractère et choix du LLM, écrits dans `joueur/config.json` ; `--reglages` pour les changer |
 
 Seul Ollama s'installe à la main sur chaque joueur, une fois : `curl -fsSL https://ollama.com/install.sh | sh` sur un Pi, [ollama.com/download](https://ollama.com/download) ailleurs.
 La partie démarre toute seule 30 s après la dernière arrivée, dès qu'il y a 3 IA (ou plus tôt avec Entrée dans le terminal du serveur).

@@ -90,6 +90,29 @@ def test_config_reprend_les_reponses(tmp_path, monkeypatch):
     assert config["personnalite"] == "Tu es paranoïaque."
 
 
+def test_entree_fermee_tire_la_config_au_sort(tmp_path, monkeypatch):
+    def fermee(question):
+        raise EOFError
+
+    monkeypatch.setattr("builtins.input", fermee)
+    monkeypatch.setattr(installation.sys, "stdin", SimpleNamespace(isatty=lambda: True))   # NUL, sous Windows
+    chemin = tmp_path / "config.json"
+
+    installation.creer_config(chemin)
+
+    assert joueur.lire_config(chemin)["ville"] in installation.VILLES
+
+
+def test_nom_propose_numerote_pour_un_id_unique(tmp_path, monkeypatch):
+    monkeypatch.setattr(installation.sys, "stdin", None)
+    monkeypatch.setattr(installation.random, "randint", lambda debut, fin: 427)
+    chemin = tmp_path / "config.json"
+
+    installation.creer_config(chemin)
+
+    assert json.loads(chemin.read_text(encoding="utf-8"))["id"].endswith("427")
+
+
 def test_ville_hors_liste_sans_coordonnees():
     config = installation.nouvelle_config("Kuro", "Chambéry")
 
@@ -126,6 +149,14 @@ def test_ollama_absent_explique_comment_l_installer(ollama, capsys):
 
     assert "ollama.com/install.sh" in capsys.readouterr().out
     assert ollama.pulls == []
+
+
+def test_gemini_sans_ollama_n_annonce_pas_un_vote_par_calcul(ollama, capsys):
+    ollama.installes = None
+
+    installation.preparer_ollama(config_ollama(), "Gemini")
+
+    assert "Gemini parlera" in capsys.readouterr().out
 
 
 def test_telechargement_refuse_par_ollama(ollama, capsys):

@@ -27,7 +27,7 @@ jobs:
       - name: Lint (règles ruff de pyproject.toml)
         run: uvx ruff check --output-format=github .
       - name: Syntaxe
-        run: uv run python -m py_compile serveur.py joueur/*.py maitre_du_jeu/*.py outils/*.py
+        run: uv run python -m py_compile serveur.py jouer.py joueur/*.py maitre_du_jeu/*.py outils/*.py
       - name: Tests unitaires
         run: uv run pytest -q
 
